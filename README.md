@@ -94,8 +94,8 @@ Using chronological backtesting on the starter dataset across Kenya's 47 facilit
 ## Team
 | Name | Role | Country | Presenting Friday (in person / online) |
 |------|------|---------|-----------------------------------------|
-| [Team Member 1] | Lead Developer / ML Engineer | Kenya | In Person |
-| [Team Member 2] | Healthcare Domain / Clinical Lead | Kenya | In Person |
+| Chima Emmanuel | Lead Developer / ML Engineer | Nigeria | Online |
+| 
 
 ## Known limits and next steps
 - Add SMS dispatch integration for drivers via Africa's Talking.

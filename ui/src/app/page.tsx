@@ -178,9 +178,11 @@ export default function DashboardPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const API_BASE = typeof window !== 'undefined' && window.location.port === '3000'
-    ? '/api'
-    : 'http://localhost:8000/api';
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '')
+    : (typeof window !== 'undefined' && window.location.port === '3000'
+        ? '/api'
+        : 'http://localhost:8000/api');
 
   // Authenticated fetch wrapper injecting Bearer token
   const authFetch = async (url: string, options: RequestInit = {}, customToken?: string) => {

@@ -12,8 +12,11 @@ import {
   Flame,
   Hospital,
   Info,
+  Key,
   Layers,
   LineChart,
+  Lock,
+  LogOut,
   MapPin,
   RefreshCw,
   ShieldAlert,
@@ -133,6 +136,15 @@ export default function DashboardPage() {
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
   const [recFilter, setRecFilter] = useState<string>('Pending Approval');
 
+  // Authentication State
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<{ username: string; name: string; role: string; facility_id: string } | null>(null);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [loginUsername, setLoginUsername] = useState<string>('dr_odhiambo');
+  const [loginPassword, setLoginPassword] = useState<string>('bloodbank2026');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
   // Modals state
   const [modifyModal, setModifyModal] = useState<{
     isOpen: boolean;
@@ -171,18 +183,95 @@ export default function DashboardPage() {
     ? '/api'
     : 'http://localhost:8000/api';
 
+  // Authenticated fetch wrapper injecting Bearer token
+  const authFetch = async (url: string, options: RequestInit = {}, customToken?: string) => {
+    const token = customToken || authToken || (typeof window !== 'undefined' ? localStorage.getItem('terumo_token') : null);
+    const headers = {
+      ...(options.headers || {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('terumo_token');
+        localStorage.removeItem('terumo_user');
+      }
+      setAuthToken(null);
+      setAuthUser(null);
+      throw new Error('Unauthorized');
+    }
+    return res;
+  };
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Invalid username or password');
+      }
+      const data = await res.json();
+      setAuthToken(data.token);
+      setAuthUser(data.user);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('terumo_token', data.token);
+        localStorage.setItem('terumo_user', JSON.stringify(data.user));
+      }
+      showToast(`Welcome back, ${data.user.name}`, 'success');
+      await loadData(data.token);
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication failed');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('terumo_token');
+      localStorage.removeItem('terumo_user');
+    }
+    setAuthToken(null);
+    setAuthUser(null);
+    showToast('Signed out successfully.', 'info');
+  };
+
+  // Check persisted auth session on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedToken = localStorage.getItem('terumo_token');
+      const savedUser = localStorage.getItem('terumo_user');
+      if (savedToken) {
+        setAuthToken(savedToken);
+        if (savedUser) {
+          try {
+            setAuthUser(JSON.parse(savedUser));
+          } catch (e) {}
+        }
+      }
+    }
+    setAuthChecking(false);
+  }, []);
+
   // Fetch initial data
-  const loadData = async () => {
+  const loadData = async (overrideToken?: string) => {
     try {
       setLoading(true);
       const [facRes, invRes, foreRes, riskRes, recRes, auditRes, statusRes] = await Promise.all([
-        fetch(`${API_BASE}/facilities`).then((r) => r.json()),
-        fetch(`${API_BASE}/inventory`).then((r) => r.json()),
-        fetch(`${API_BASE}/forecasts`).then((r) => r.json()),
-        fetch(`${API_BASE}/stockout-risks`).then((r) => r.json()),
-        fetch(`${API_BASE}/recommendations`).then((r) => r.json()),
-        fetch(`${API_BASE}/audit-logs`).then((r) => r.json()),
-        fetch(`${API_BASE}/system-status`).then((r) => r.json()),
+        authFetch(`${API_BASE}/facilities`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/inventory`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/forecasts`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/stockout-risks`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/recommendations`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/audit-logs`, {}, overrideToken).then((r) => r.json()),
+        authFetch(`${API_BASE}/system-status`, {}, overrideToken).then((r) => r.json()),
       ]);
 
       setFacilities(facRes.facilities || []);
@@ -204,8 +293,10 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (authToken) {
+      loadData(authToken);
+    }
+  }, [authToken]);
 
   // KPIs
   const totalUsableUnits = useMemo(
@@ -273,11 +364,11 @@ export default function DashboardPage() {
   const handleApprove = async (recId: string) => {
     try {
       setActionLoading(true);
-      const res = await fetch(`${API_BASE}/recommendations/${recId}/approve`, {
+      const res = await authFetch(`${API_BASE}/recommendations/${recId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 'dr_odhiambo_chief_transfusion',
+          user_id: authUser?.username || 'dr_odhiambo',
           notes: 'Authorized for immediate emergency vehicle dispatch.',
         }),
       });
@@ -296,11 +387,11 @@ export default function DashboardPage() {
     if (!modifyModal.rec) return;
     try {
       setActionLoading(true);
-      const res = await fetch(`${API_BASE}/recommendations/${modifyModal.rec.recommendation_id}/modify`, {
+      const res = await authFetch(`${API_BASE}/recommendations/${modifyModal.rec.recommendation_id}/modify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: modifyModal.user,
+          user_id: modifyModal.user || authUser?.username || 'dr_odhiambo',
           modified_quantity: modifyModal.newQty,
           notes: modifyModal.notes,
         }),
@@ -321,11 +412,11 @@ export default function DashboardPage() {
     if (!rejectModal.rec) return;
     try {
       setActionLoading(true);
-      const res = await fetch(`${API_BASE}/recommendations/${rejectModal.rec.recommendation_id}/reject`, {
+      const res = await authFetch(`${API_BASE}/recommendations/${rejectModal.rec.recommendation_id}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: rejectModal.user,
+          user_id: rejectModal.user || authUser?.username || 'dr_odhiambo',
           reason: rejectModal.reason,
         }),
       });
@@ -344,7 +435,7 @@ export default function DashboardPage() {
   const handleSimulate = async () => {
     try {
       setActionLoading(true);
-      const res = await fetch(`${API_BASE}/stockout-risks/simulate`, { method: 'POST' });
+      const res = await authFetch(`${API_BASE}/stockout-risks/simulate`, { method: 'POST' });
       if (res.ok) {
         showToast('⚡ Forward stockout simulation re-calculated with dynamic expirations.', 'success');
         await loadData();
@@ -359,7 +450,7 @@ export default function DashboardPage() {
   const handleRetrainForecast = async () => {
     try {
       setActionLoading(true);
-      const res = await fetch(`${API_BASE}/forecasts/run`, { method: 'POST' });
+      const res = await authFetch(`${API_BASE}/forecasts/run`, { method: 'POST' });
       if (res.ok) {
         showToast('🔄 LightGBM model re-trained with 14-day recursive roll-forward.', 'success');
         await loadData();
@@ -370,6 +461,149 @@ export default function DashboardPage() {
       setActionLoading(false);
     }
   };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#140204] text-white">
+        <div className="flex items-center gap-3">
+          <RefreshCw className="w-6 h-6 animate-spin text-red-500" />
+          <span className="text-sm font-medium">Verifying healthcare session credentials...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authToken) {
+    return (
+      <div className="min-h-screen flex flex-col justify-center items-center bg-[#120204] text-[#FFF6F6] px-4 py-8 relative overflow-hidden">
+        {/* Ambient decorative glow */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-red-900/20 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Toast Notification */}
+        {toast && (
+          <div
+            className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-sm font-medium transition-all ${
+              toast.type === 'success'
+                ? 'bg-emerald-950/90 border-emerald-600 text-emerald-200'
+                : toast.type === 'error'
+                ? 'bg-red-950/90 border-red-600 text-red-200'
+                : 'bg-blue-950/90 border-blue-600 text-blue-200'
+            }`}
+          >
+            {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <AlertTriangle className="w-5 h-5 text-red-400" />}
+            <span>{toast.message}</span>
+          </div>
+        )}
+
+        <div className="w-full max-w-md relative z-10 space-y-6">
+          {/* Brand & Badge */}
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-red-600 to-red-900 shadow-xl shadow-red-950/80 mb-2 border border-red-500/30">
+              <span className="text-3xl">🩸</span>
+            </div>
+            <div>
+              <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-red-950 text-red-400 border border-red-800/70">
+                Terumo BCT Africa Hackathon 2026
+              </span>
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-tight">Blood Inventory Intelligence</h1>
+            <p className="text-xs text-gray-400 max-w-xs mx-auto">
+              Kenyan National Blood Transfusion Service Decision-Support Node
+            </p>
+          </div>
+
+          {/* Login Card */}
+          <div className="p-6 sm:p-8 bg-[#1E0508]/90 border border-[#48151A] rounded-2xl shadow-2xl backdrop-blur-md space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-[#3E1116]">
+              <div className="flex items-center gap-2 text-xs font-semibold text-red-300">
+                <Lock className="w-4 h-4 text-red-400" />
+                <span>Restricted Medical Access Gate</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 font-mono">
+                RBAC Level 3
+              </span>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-lg bg-red-950/80 border border-red-600/70 text-red-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            {/* Quick-fill demo credentials banner */}
+            <div
+              onClick={() => {
+                setLoginUsername('dr_odhiambo');
+                setLoginPassword('bloodbank2026');
+              }}
+              className="p-3 rounded-xl bg-gradient-to-r from-red-950/60 to-red-900/30 border border-red-700/40 cursor-pointer hover:border-red-500/60 transition group"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold text-red-300 uppercase tracking-wider flex items-center gap-1">
+                  <Key className="w-3 h-3 text-red-400" /> Demo Credentials (Click to prefill)
+                </span>
+                <span className="text-[10px] text-red-400 group-hover:underline">Use &rarr;</span>
+              </div>
+              <div className="font-mono text-xs text-gray-300 flex items-center justify-between">
+                <span>User: <strong className="text-white">dr_odhiambo</strong></span>
+                <span>Pass: <strong className="text-white">bloodbank2026</strong></span>
+              </div>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="text-gray-300 font-medium">Healthcare Officer ID / Username</label>
+                <input
+                  type="text"
+                  required
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="e.g. dr_odhiambo"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#120204] border border-[#48151A] text-white focus:outline-none focus:border-red-500 font-mono text-sm placeholder:text-gray-600 transition"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-gray-300 font-medium">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#120204] border border-[#48151A] text-white focus:outline-none focus:border-red-500 text-sm placeholder:text-gray-600 transition"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-sm shadow-lg shadow-red-950/60 flex items-center justify-center gap-2 transition disabled:opacity-50"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Authorizing Officer Session...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Sign In to Blood Intelligence Node</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-[#3E1116] text-[10px] text-gray-500 space-y-1 text-center">
+              <p>🔒 Enforces cryptographic audit trail under ISBT 128 & Kenya NBTS guidelines.</p>
+              <p>All human-in-the-loop transfer decisions are logged with authorizing clinician credentials.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#140204] text-[#FFF6F6]">
@@ -411,13 +645,33 @@ export default function DashboardPage() {
               <span>Sync Age: {systemStatus.data_age_hours ? `${systemStatus.data_age_hours} hrs` : '0.1 hrs'}</span>
             </div>
             <button
-              onClick={loadData}
+              onClick={() => loadData()}
               disabled={loading}
               className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-900/40 hover:bg-red-800/60 border border-red-700/50 text-white font-medium transition"
             >
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
               <span>Sync Live</span>
             </button>
+
+            {/* Authenticated Officer Badge & Sign Out */}
+            <div className="flex items-center gap-2 pl-2 border-l border-red-900/50">
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded-full bg-red-700 flex items-center justify-center text-[10px] font-bold text-white shadow-sm">
+                  {authUser?.username ? authUser.username.slice(0, 2).toUpperCase() : 'DR'}
+                </div>
+                <span className="text-gray-200 font-mono hidden sm:inline">
+                  {authUser?.username || 'dr_odhiambo'}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                title="Sign out of secure session"
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/40 hover:bg-red-950 text-gray-400 hover:text-red-300 border border-red-900/40 transition text-[11px]"
+              >
+                <LogOut className="w-3 h-3" />
+                <span className="hidden md:inline">Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>

@@ -1,15 +1,47 @@
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Header, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
+import os
+import hashlib
 import pandas as pd
 import sqlite3
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_HTML = BASE_DIR / "frontend" / "index.html"
+
+# ============================ Authentication Configuration ============================
+# Precoded credentials (can be overridden via environment variables on Render)
+VALID_USER = os.getenv("AUTH_USERNAME", "dr_odhiambo")
+VALID_PASS = os.getenv("AUTH_PASSWORD", "bloodbank2026")
+SECRET_SALT = os.getenv("SECRET_SALT", "terumo-africa-hackathon-2026-secure-salt")
+AUTH_TOKEN = hashlib.sha256(f"{VALID_USER}:{VALID_PASS}:{SECRET_SALT}".encode()).hexdigest()
+
+def verify_token(
+    authorization: Optional[str] = Header(None),
+    x_auth_token: Optional[str] = Header(None)
+):
+    """Enforces authentication: requires valid Bearer token or X-Auth-Token header."""
+    token = None
+    if authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+        else:
+            token = authorization
+    elif x_auth_token:
+        token = x_auth_token
+
+    if not token or token != AUTH_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized: Access restricted to authenticated healthcare personnel.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return True
 
 from database import get_connection, init_db, log_audit
 from forecasting import train_and_forecast_demand
@@ -47,6 +79,10 @@ class RejectRequest(BaseModel):
     user_id: str = Field(default="manager_01", description="ID or name of authorizing personnel")
     reason: str = Field(default="Clinical priority override", description="Required justification for rejection")
 
+class LoginRequest(BaseModel):
+    username: str = Field(..., description="Healthcare personnel username")
+    password: str = Field(..., description="Access password")
+
 
 @app.on_event("startup")
 def startup_event():
@@ -64,6 +100,26 @@ def startup_event():
             print(f"[Render Deployment Initialization] Pipeline run notice: {e}")
 
 
+@app.post("/api/auth/login")
+def login(creds: LoginRequest):
+    """Authenticate with precoded credentials and return a secure session token."""
+    if creds.username != VALID_USER or creds.password != VALID_PASS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password."
+        )
+    return {
+        "status": "success",
+        "token": AUTH_TOKEN,
+        "user": {
+            "username": creds.username,
+            "name": "Dr. Amina Odhiambo",
+            "role": "Regional Blood Transfusion Officer",
+            "facility_id": "RBTC-NBO"
+        }
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def root_dashboard():
     """Serves the interactive web dashboard directly at the root URL."""
@@ -74,7 +130,7 @@ def root_dashboard():
 
 # ============================ 1. Facility Endpoints ============================
 
-@app.get("/api/facilities")
+@app.get("/api/facilities", dependencies=[Depends(verify_token)])
 def get_facilities(county: Optional[str] = None, facility_type: Optional[str] = None):
     """Retrieve all facilities with optional county and type filters."""
     conn = get_connection()
@@ -96,7 +152,7 @@ def get_facilities(county: Optional[str] = None, facility_type: Optional[str] = 
 
 # ============================ 2. Inventory Endpoints ============================
 
-@app.get("/api/inventory")
+@app.get("/api/inventory", dependencies=[Depends(verify_token)])
 def get_inventory(facility_id: Optional[str] = None, blood_group: Optional[str] = None, component: Optional[str] = None):
     """Retrieve verified inventory positions across facilities."""
     conn = get_connection()
@@ -119,7 +175,7 @@ def get_inventory(facility_id: Optional[str] = None, blood_group: Optional[str] 
     return {"count": len(rows), "inventory": rows}
 
 
-@app.get("/api/inventory/{facility_id}")
+@app.get("/api/inventory/{facility_id}", dependencies=[Depends(verify_token)])
 def get_facility_inventory(facility_id: str):
     """Retrieve detailed inventory breakdown for a specific facility."""
     conn = get_connection()
@@ -153,7 +209,7 @@ def get_facility_inventory(facility_id: str):
 
 # ============================ 3. Forecasting Endpoints ============================
 
-@app.get("/api/forecasts")
+@app.get("/api/forecasts", dependencies=[Depends(verify_token)])
 def get_forecasts(facility_id: Optional[str] = None, blood_group: Optional[str] = None):
     """Retrieve latest generated demand forecasts."""
     conn = get_connection()
@@ -175,7 +231,7 @@ def get_forecasts(facility_id: Optional[str] = None, blood_group: Optional[str] 
     return {"count": len(rows), "forecasts": rows}
 
 
-@app.post("/api/forecasts/run")
+@app.post("/api/forecasts/run", dependencies=[Depends(verify_token)])
 def trigger_demand_forecasting(horizon_days: int = 14):
     """Re-train LightGBM model and generate recursive 14-day projection."""
     forecast_df, metrics = train_and_forecast_demand(horizon_days=horizon_days)
@@ -208,7 +264,7 @@ def trigger_demand_forecasting(horizon_days: int = 14):
 
 # ============================ 4. Stock-Out Risk Endpoints ============================
 
-@app.get("/api/stockout-risks")
+@app.get("/api/stockout-risks", dependencies=[Depends(verify_token)])
 def get_stockout_risks(risk_status: Optional[str] = None, facility_id: Optional[str] = None):
     """Retrieve stock-out early warnings with explainability evidence."""
     conn = get_connection()
@@ -230,7 +286,7 @@ def get_stockout_risks(risk_status: Optional[str] = None, facility_id: Optional[
     return {"count": len(rows), "risks": rows}
 
 
-@app.post("/api/stockout-risks/simulate")
+@app.post("/api/stockout-risks/simulate", dependencies=[Depends(verify_token)])
 def trigger_inventory_simulation():
     """Run forward simulation of stock depletion and unit expiry against forecasts."""
     conn = get_connection()
@@ -286,7 +342,7 @@ def trigger_inventory_simulation():
 
 # ============================ 5. Recommendation Endpoints ============================
 
-@app.get("/api/recommendations")
+@app.get("/api/recommendations", dependencies=[Depends(verify_token)])
 def get_recommendations(status: Optional[str] = None, target_facility_id: Optional[str] = None):
     """Retrieve proposed inter-facility transfer recommendations."""
     conn = get_connection()
@@ -306,7 +362,7 @@ def get_recommendations(status: Optional[str] = None, target_facility_id: Option
     return {"count": len(rows), "recommendations": rows}
 
 
-@app.post("/api/recommendations/{rec_id}/approve")
+@app.post("/api/recommendations/{rec_id}/approve", dependencies=[Depends(verify_token)])
 def approve_recommendation(rec_id: str, payload: ApprovalRequest = Body(...)):
     """Authorize a transfer recommendation (Accept)."""
     conn = get_connection()
@@ -342,7 +398,7 @@ def approve_recommendation(rec_id: str, payload: ApprovalRequest = Body(...)):
     return {"status": "success", "recommendation_id": rec_id, "action": "Approved", "user": payload.user_id}
 
 
-@app.post("/api/recommendations/{rec_id}/modify")
+@app.post("/api/recommendations/{rec_id}/modify", dependencies=[Depends(verify_token)])
 def modify_recommendation(rec_id: str, payload: ModifyRequest = Body(...)):
     """Modify transfer quantity and approve (Modify)."""
     conn = get_connection()
@@ -386,7 +442,7 @@ def modify_recommendation(rec_id: str, payload: ModifyRequest = Body(...)):
     }
 
 
-@app.post("/api/recommendations/{rec_id}/reject")
+@app.post("/api/recommendations/{rec_id}/reject", dependencies=[Depends(verify_token)])
 def reject_recommendation(rec_id: str, payload: RejectRequest = Body(...)):
     """Decline a proposed transfer recommendation with justification (Reject)."""
     conn = get_connection()
@@ -424,7 +480,7 @@ def reject_recommendation(rec_id: str, payload: RejectRequest = Body(...)):
 
 # ============================ 6. Audit Logs & System Status ============================
 
-@app.get("/api/audit-logs")
+@app.get("/api/audit-logs", dependencies=[Depends(verify_token)])
 def get_audit_logs():
     """Retrieve decision audit trail preserving human-in-the-loop decisions."""
     conn = get_connection()
@@ -436,7 +492,7 @@ def get_audit_logs():
 
 # ============================ 7. Grounded LLM Assistant Endpoints ============================
 
-@app.get("/api/llm/dispatch-brief/{rec_id}")
+@app.get("/api/llm/dispatch-brief/{rec_id}", dependencies=[Depends(verify_token)])
 def get_dispatch_brief(rec_id: str):
     """
     Generates a grounded bilingual (English & Swahili) Courier Transport Manifest
@@ -449,7 +505,7 @@ def get_dispatch_brief(rec_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/api/llm/draft-donor-appeal")
+@app.get("/api/llm/draft-donor-appeal", dependencies=[Depends(verify_token)])
 def get_donor_appeal(facility_id: str = Query(...), blood_group: str = Query(...)):
     """
     Drafts a targeted emergency SMS donor recruitment campaign grounded strictly in
@@ -462,7 +518,7 @@ def get_donor_appeal(facility_id: str = Query(...), blood_group: str = Query(...
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/api/system-status")
+@app.get("/api/system-status", dependencies=[Depends(verify_token)])
 def get_system_status():
     """Evaluate telemetry age, connectivity state, and fallback heuristic mode."""
     return evaluate_system_health()

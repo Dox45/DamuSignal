@@ -12,7 +12,6 @@ import {
   Flame,
   Hospital,
   Info,
-  Key,
   Layers,
   LineChart,
   Lock,
@@ -140,8 +139,8 @@ export default function DashboardPage() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<{ username: string; name: string; role: string; facility_id: string } | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
-  const [loginUsername, setLoginUsername] = useState<string>('dr_odhiambo');
-  const [loginPassword, setLoginPassword] = useState<string>('bloodbank2026');
+  const [loginUsername, setLoginUsername] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
@@ -530,26 +529,6 @@ export default function DashboardPage() {
                 <span>{authError}</span>
               </div>
             )}
-
-            {/* Quick-fill demo credentials banner */}
-            <div
-              onClick={() => {
-                setLoginUsername('dr_odhiambo');
-                setLoginPassword('bloodbank2026');
-              }}
-              className="p-3 rounded-xl bg-gradient-to-r from-red-950/60 to-red-900/30 border border-red-700/40 cursor-pointer hover:border-red-500/60 transition group"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-bold text-red-300 uppercase tracking-wider flex items-center gap-1">
-                  <Key className="w-3 h-3 text-red-400" /> Demo Credentials (Click to prefill)
-                </span>
-                <span className="text-[10px] text-red-400 group-hover:underline">Use &rarr;</span>
-              </div>
-              <div className="font-mono text-xs text-gray-300 flex items-center justify-between">
-                <span>User: <strong className="text-white">dr_odhiambo</strong></span>
-                <span>Pass: <strong className="text-white">bloodbank2026</strong></span>
-              </div>
-            </div>
 
             <form onSubmit={handleLogin} className="space-y-4 text-xs">
               <div className="space-y-1.5">

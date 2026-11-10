@@ -555,26 +555,14 @@
 
       <div id="login-error-msg" class="hidden p-2.5 rounded bg-red-950/80 border border-red-600 text-red-200 text-xs"></div>
 
-      <!-- Quick prefill helper -->
-      <div onclick="prefillLogin('dr_odhiambo', 'bloodbank2026')" class="p-2.5 rounded-lg bg-red-950/60 border border-red-800/60 cursor-pointer hover:border-red-500 transition text-xs">
-        <div class="flex justify-between items-center text-[10px] text-red-300 font-bold uppercase">
-          <span>🔑 Demo Credentials (Click to load)</span>
-          <span class="text-red-400">Auto-fill &rarr;</span>
-        </div>
-        <div class="font-mono text-gray-300 mt-1 flex justify-between">
-          <span>User: <strong class="text-white">dr_odhiambo</strong></span>
-          <span>Pass: <strong class="text-white">bloodbank2026</strong></span>
-        </div>
-      </div>
-
       <form onsubmit="handleLoginSubmit(event)" class="space-y-4 text-xs">
         <div>
           <label class="block text-gray-300 font-medium mb-1">Username / Personnel ID:</label>
-          <input type="text" id="login-username" required class="w-full bg-[#140204] border border-[#5E1B21] rounded p-2.5 text-white font-mono text-sm" value="dr_odhiambo">
+          <input type="text" id="login-username" required class="w-full bg-[#140204] border border-[#5E1B21] rounded p-2.5 text-white font-mono text-sm placeholder:text-gray-600" placeholder="e.g. dr_odhiambo">
         </div>
         <div>
           <label class="block text-gray-300 font-medium mb-1">Access Password:</label>
-          <input type="password" id="login-password" required class="w-full bg-[#140204] border border-[#5E1B21] rounded p-2.5 text-white text-sm" value="bloodbank2026">
+          <input type="password" id="login-password" required class="w-full bg-[#140204] border border-[#5E1B21] rounded p-2.5 text-white text-sm placeholder:text-gray-600" placeholder="••••••••••••">
         </div>
         <button type="submit" id="login-submit-btn" class="w-full py-2.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-sm shadow-md transition">
           Sign In to Blood Intelligence Node
@@ -682,11 +670,6 @@
       localStorage.removeItem('terumo_token');
       localStorage.removeItem('terumo_user');
       checkAuth();
-    }
-
-    function prefillLogin(u, p) {
-      document.getElementById('login-username').value = u;
-      document.getElementById('login-password').value = p;
     }
 
     let state = {

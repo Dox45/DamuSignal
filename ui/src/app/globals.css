@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --background: #140204;
+  --foreground: #FFF6F6;
+}
+
+body {
+  background-color: #140204;
+  color: #FFF6F6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #1e0507;
+}
+::-webkit-scrollbar-thumb {
+  background: #4a1c1f;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #e4000f;
+}

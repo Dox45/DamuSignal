@@ -1,0 +1,41 @@
+# Python virtual environment and bytecode
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Datasets and SQLite Database (Render deployment will generate on build)
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+blood_inventory.db
+
+# Next.js and Node.js artifacts
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/build/
+ui/.pnpm-store/
+ui/*.tsbuildinfo
+ui/next-env.d.ts
+node_modules/
+.next/
+out/
+build/
+
+# Environment and logs
+.env
+.env*.local
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Operating System files
+.DS_Store
+Thumbs.db

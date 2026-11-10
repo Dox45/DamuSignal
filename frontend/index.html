@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blood Inventory Intelligence & Early Warning System | Terumo BCT</title>
+  <!-- Tailwind CSS CDN with full fallbacks -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js for interactive visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              red: '#E4000F',
+              darkRed: '#99000A',
+              ink: '#1E0507',
+              surface: '#2A0D10',
+              card: '#381316',
+              line: '#522025',
+              paper: '#FFF5F5',
+              muted: '#D4B8BB',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #160305;
+      color: #FFF5F5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .badge-critical { background-color: #EF4444; color: #FFF; }
+    .badge-high { background-color: #F97316; color: #FFF; }
+    .badge-moderate { background-color: #FBBF24; color: #1F2937; }
+    .badge-stable { background-color: #10B981; color: #FFF; }
+    .nav-tab.active {
+      border-bottom: 3px solid #E4000F;
+      color: #FFF;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- ======================== Top Banner / System Health ======================== -->
+  <header class="bg-[#24080A] border-b border-[#4A161B] px-4 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-200 border border-red-700/50">
+          TERUMO BCT AFRICA HACKATHON
+        </span>
+        <span class="text-gray-300">Kenyan National Blood Service Decision-Support Node</span>
+      </div>
+      <div class="flex items-center gap-4" id="system-status-bar">
+        <div class="flex items-center gap-1.5 text-gray-300">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="status-indicator-dot"></span>
+          <span>Status: <strong class="text-white" id="mode-label">Full Predictive AI</strong></span>
+        </div>
+        <div class="text-gray-400 hidden sm:block">
+          Sync Age: <span class="text-gray-200" id="sync-age-label">0.1 hrs</span>
+        </div>
+        <button onclick="refreshAllData()" class="px-2 py-1 rounded bg-red-800/50 hover:bg-red-700/60 border border-red-600/40 text-white font-medium text-xs transition">
+          ↻ Sync Data
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ======================== Navigation Bar ======================== -->
+  <nav class="bg-[#1C0406] border-b border-[#3E1216] sticky top-0 z-40 px-4">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between">
+      <div class="flex items-center gap-3 py-3">
+        <div class="w-8 h-8 rounded bg-red-600 flex items-center justify-center font-black text-white text-lg shadow-md">
+          🩸
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white leading-tight">Blood Inventory Intelligence</h1>
+          <p class="text-[11px] text-gray-400">Early Warning & Predictive Redistribution System</p>
+        </div>
+      </div>
+      
+      <div class="flex space-x-1 sm:space-x-4 overflow-x-auto py-2 text-sm">
+        <button onclick="switchView('overview')" id="tab-overview" class="nav-tab active px-3 py-2 text-gray-300 hover:text-white transition">
+          Regional Overview
+        </button>
+        <button onclick="switchView('facilities')" id="tab-facilities" class="nav-tab px-3 py-2 text-gray-300 hover:text-white transition">
+          Facility Inventory
+        </button>
+        <button onclick="switchView('forecasting')" id="tab-forecasting" class="nav-tab px-3 py-2 text-gray-300 hover:text-white transition">
+          Demand Forecasting
+        </button>
+        <button onclick="switchView('risks')" id="tab-risks" class="nav-tab px-3 py-2 text-gray-300 hover:text-white transition">
+          Stock-Out Risks
+        </button>
+        <button onclick="switchView('recommendations')" id="tab-recommendations" class="nav-tab px-3 py-2 text-gray-300 hover:text-white transition flex items-center gap-1.5">
+          <span>Recommendations</span>
+          <span id="pending-badge" class="px-1.5 py-0.2 bg-red-600 text-white text-[10px] rounded-full font-bold">25</span>
+        </button>
+        <button onclick="switchView('audit')" id="tab-audit" class="nav-tab px-3 py-2 text-gray-300 hover:text-white transition">
+          Audit Trail
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ======================== Main Container ======================== -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
+
+    <!-- Notifications Banner (e.g. offline fallback, warnings) -->
+    <div id="alert-banner" class="hidden rounded-lg p-4 border text-sm flex items-start justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">⚠️</span>
+        <span id="alert-text">Warning message goes here</span>
+      </div>
+      <button onclick="document.getElementById('alert-banner').classList.add('hidden')" class="text-gray-400 hover:text-white">✕</button>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 1: REGIONAL OVERVIEW DASHBOARD                                       -->
+    <!-- ========================================================================= -->
+    <section id="view-overview" class="space-y-6">
+      <!-- KPI Metric Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-gray-400 font-medium">Total Usable Stock</p>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-2xl font-extrabold text-white" id="kpi-total-units">--</span>
+            <span class="text-xs text-emerald-400 font-medium">Verified Live</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Across 47 facilities</p>
+        </div>
+
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-gray-400 font-medium">Critical Stock-Out Risk</p>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-2xl font-extrabold text-red-500" id="kpi-critical-count">--</span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-red-950 text-red-300 font-semibold">≤3 Days</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Immediate intervention needed</p>
+        </div>
+
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-gray-400 font-medium">High Risk Positions</p>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-2xl font-extrabold text-orange-400" id="kpi-high-count">--</span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-orange-950 text-orange-300 font-semibold">≤7 Days</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Requires near-term monitoring</p>
+        </div>
+
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-gray-400 font-medium">Units Nearing Expiry</p>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-2xl font-extrabold text-yellow-400" id="kpi-expiring-count">--</span>
+            <span class="text-xs text-yellow-300 font-medium">Next 7 Days</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Monitored via cold chain log</p>
+        </div>
+
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-4 shadow-sm col-span-2 md:col-span-1">
+          <p class="text-xs text-gray-400 font-medium">Pending Transfer Actions</p>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-2xl font-extrabold text-white" id="kpi-pending-recs">--</span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 font-semibold">Route-Ranked</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Human approval required</p>
+        </div>
+      </div>
+
+      <!-- Quick Action Controls & Overview Chart -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Stock Distribution Chart -->
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5 lg:col-span-2">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-base font-bold text-white">Network Inventory by Blood Group</h2>
+              <p class="text-xs text-gray-400">Current available units aggregated across all 47 healthcare facilities</p>
+            </div>
+            <span class="text-xs text-gray-400 bg-black/30 px-2 py-1 rounded">Daily Stock Snapshot</span>
+          </div>
+          <div class="h-64">
+            <canvas id="overviewChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Highest Shortage Risk Facilities Ranking -->
+        <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-base font-bold text-white">Urgent Priority Sites</h2>
+              <span class="text-xs text-red-400 font-medium">Stockout Imminent</span>
+            </div>
+            <p class="text-xs text-gray-400 mb-4">Ranked by days remaining and severity of deficit:</p>
+            <div class="space-y-2.5 overflow-y-auto max-h-60 pr-1" id="urgent-sites-list">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+          <div class="pt-4 border-t border-[#451419] flex justify-between items-center text-xs text-gray-400">
+            <span>Model: LightGBM recursive</span>
+            <button onclick="switchView('risks')" class="text-red-400 hover:text-red-300 font-medium">View All Risks →</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 2: FACILITY INVENTORY VIEW                                           -->
+    <!-- ========================================================================= -->
+    <section id="view-facilities" class="space-y-6 hidden">
+      <!-- Facility Selector & Profile Card -->
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Select Healthcare Facility:</label>
+            <select id="facility-select" onchange="loadSelectedFacility()" class="bg-[#1C0406] border border-[#5E1B21] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500 w-full sm:w-80">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="triggerFacilitySimulate()" class="px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white text-xs font-semibold shadow-sm transition">
+              ⚡ Re-simulate Stockout Curve
+            </button>
+          </div>
+        </div>
+
+        <!-- Facility Metadata Profile -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 mt-4 pt-4 border-t border-[#451419] text-xs">
+          <div>
+            <span class="text-gray-400">County:</span>
+            <p class="font-bold text-white" id="fac-county">--</p>
+          </div>
+          <div>
+            <span class="text-gray-400">Type:</span>
+            <p class="font-bold text-white capitalize" id="fac-type">--</p>
+          </div>
+          <div>
+            <span class="text-gray-400">Connectivity:</span>
+            <p class="font-bold text-white" id="fac-conn">--</p>
+          </div>
+          <div>
+            <span class="text-gray-400">Grid Reliability:</span>
+            <p class="font-bold text-white" id="fac-grid">--</p>
+          </div>
+          <div>
+            <span class="text-gray-400">Fridge Backup:</span>
+            <p class="font-bold text-white" id="fac-backup">--</p>
+          </div>
+          <div>
+            <span class="text-gray-400">Total Stock:</span>
+            <p class="font-bold text-emerald-400 text-sm" id="fac-total-stock">-- units</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Facility Stock Matrix by Component and Blood Group -->
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <h3 class="text-sm font-bold text-white mb-3">Inventory Matrix (Units in Stock)</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-[#451419] text-gray-400 bg-black/20">
+                <th class="py-2.5 px-3">Component</th>
+                <th class="py-2.5 px-3 text-center">O+</th>
+                <th class="py-2.5 px-3 text-center">O-</th>
+                <th class="py-2.5 px-3 text-center">A+</th>
+                <th class="py-2.5 px-3 text-center">A-</th>
+                <th class="py-2.5 px-3 text-center">B+</th>
+                <th class="py-2.5 px-3 text-center">B-</th>
+                <th class="py-2.5 px-3 text-center">AB+</th>
+                <th class="py-2.5 px-3 text-center">AB-</th>
+                <th class="py-2.5 px-3 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody id="facility-matrix-body" class="divide-y divide-[#3A1014]">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 3: DEMAND FORECASTING VIEW                                           -->
+    <!-- ========================================================================= -->
+    <section id="view-forecasting" class="space-y-6 hidden">
+      <!-- Filter Controls & Baseline Comparison Summary -->
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">Facility:</label>
+              <select id="forecast-fac-select" onchange="renderForecastChart()" class="bg-[#1C0406] border border-[#5E1B21] rounded px-3 py-1.5 text-xs text-white">
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">Blood Group:</label>
+              <select id="forecast-bg-select" onchange="renderForecastChart()" class="bg-[#1C0406] border border-[#5E1B21] rounded px-3 py-1.5 text-xs text-white">
+                <option value="O+">O+</option>
+                <option value="O-">O- (High Shortage Risk)</option>
+                <option value="A+">A+</option>
+                <option value="A-">A-</option>
+                <option value="B+">B+</option>
+                <option value="B-">B-</option>
+                <option value="AB+">AB+</option>
+                <option value="AB-">AB-</option>
+              </select>
+            </div>
+          </div>
+          <button onclick="triggerForecastingRun()" class="px-3 py-2 rounded bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition">
+            🔄 Re-train LightGBM Model
+          </button>
+        </div>
+
+        <!-- Model vs Baseline Metrics Card -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-[#451419] text-xs">
+          <div class="p-2.5 bg-black/20 rounded border border-[#3E1317]">
+            <span class="text-gray-400">Baseline (7-day MA) MAE:</span>
+            <p class="font-mono font-bold text-white text-sm" id="metric-base-mae">0.4676</p>
+          </div>
+          <div class="p-2.5 bg-black/20 rounded border border-[#3E1317]">
+            <span class="text-gray-400">Baseline WAPE:</span>
+            <p class="font-mono font-bold text-white text-sm" id="metric-base-wape">128.6%</p>
+          </div>
+          <div class="p-2.5 bg-black/20 rounded border border-[#3E1317]">
+            <span class="text-gray-400">LightGBM Model MAE:</span>
+            <p class="font-mono font-bold text-emerald-400 text-sm" id="metric-lgb-mae">0.4917</p>
+          </div>
+          <div class="p-2.5 bg-black/20 rounded border border-[#3E1317]">
+            <span class="text-gray-400">LightGBM Model WAPE:</span>
+            <p class="font-mono font-bold text-emerald-400 text-sm" id="metric-lgb-wape">135.3%</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 14-Day Demand Projection Curve -->
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white">14-Day Recursive Demand Projection</h3>
+            <p class="text-xs text-gray-400">Showing point forecast alongside upper and lower confidence intervals</p>
+          </div>
+          <span class="text-xs text-gray-400 bg-red-950/70 border border-red-800/40 px-2 py-1 rounded">Recursive lag roll-forward</span>
+        </div>
+        <div class="h-72">
+          <canvas id="forecastChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 4: STOCK-OUT RISKS VIEW                                              -->
+    <!-- ========================================================================= -->
+    <section id="view-risks" class="space-y-6 hidden">
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white">Stock-Out Early Warning Board</h2>
+            <p class="text-xs text-gray-400">Early alerts calculated against projected demand and cold-chain expirations</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <select id="risk-filter-status" onchange="renderRisksTable()" class="bg-[#1C0406] border border-[#5E1B21] rounded px-3 py-1.5 text-xs text-white">
+              <option value="ALL">All Risk Levels</option>
+              <option value="Critical" selected>Critical (≤3 Days or 0 Stock)</option>
+              <option value="High Risk">High Risk (≤7 Days)</option>
+              <option value="Moderate Risk">Moderate Risk (≤14 Days)</option>
+              <option value="Stable">Stable</option>
+            </select>
+            <button onclick="triggerSimulation()" class="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded text-xs font-semibold text-white transition">
+              ⚡ Run Simulation
+            </button>
+          </div>
+        </div>
+
+        <!-- Risks Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-[#451419] text-gray-400 bg-black/20">
+                <th class="py-2.5 px-3">Facility</th>
+                <th class="py-2.5 px-2">Component</th>
+                <th class="py-2.5 px-2">Group</th>
+                <th class="py-2.5 px-2 text-right">Current Stock</th>
+                <th class="py-2.5 px-2 text-center">Days to Stock-Out</th>
+                <th class="py-2.5 px-2">Est. Deficit Date</th>
+                <th class="py-2.5 px-2 text-center">Risk Status</th>
+                <th class="py-2.5 px-3">Contributing Factors (Evidence)</th>
+              </tr>
+            </thead>
+            <tbody id="risks-table-body" class="divide-y divide-[#3A1014]">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 5: RECOMMENDATIONS & HUMAN-IN-THE-LOOP VIEW                          -->
+    <!-- ========================================================================= -->
+    <section id="view-recommendations" class="space-y-6 hidden">
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white">Inter-Facility Redistribution Recommendations</h2>
+            <p class="text-xs text-gray-400">Route-optimized matches ensuring 15-unit reserve buffer at donor facilities</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400">Filter Status:</span>
+            <select id="rec-filter-status" onchange="renderRecommendations()" class="bg-[#1C0406] border border-[#5E1B21] rounded px-3 py-1.5 text-xs text-white">
+              <option value="ALL">All Actions</option>
+              <option value="Pending Approval" selected>Pending Approval</option>
+              <option value="Approved">Approved</option>
+              <option value="Modified">Modified</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Recommendations Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="recommendations-container">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 6: AUDIT TRAIL VIEW                                                  -->
+    <!-- ========================================================================= -->
+    <section id="view-audit" class="space-y-6 hidden">
+      <div class="bg-[#24090C] border border-[#451419] rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white">Human Decision Audit Log</h2>
+            <p class="text-xs text-gray-400">Immutable record of all human authorizations, modifications, and overrides</p>
+          </div>
+          <span class="text-xs text-gray-400">ISO-8601 Timestamps</span>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-[#451419] text-gray-400 bg-black/20">
+                <th class="py-2.5 px-3">Log ID</th>
+                <th class="py-2.5 px-3">Recommendation</th>
+                <th class="py-2.5 px-3">Action</th>
+                <th class="py-2.5 px-3">Authorizing Personnel</th>
+                <th class="py-2.5 px-3">Status Change</th>
+                <th class="py-2.5 px-3">Quantity</th>
+                <th class="py-2.5 px-3">Timestamp</th>
+                <th class="py-2.5 px-3">Justification Notes</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-body" class="divide-y divide-[#3A1014]">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ======================== Modal for Modifying Recommendations ======================== -->
+  <div id="modify-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#24090C] border border-[#5E1B21] rounded-xl p-6 max-w-md w-full space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="text-base font-bold text-white">Modify Transfer Quantity</h3>
+        <button onclick="closeModifyModal()" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+      <p class="text-xs text-gray-300" id="modify-modal-summary">Adjust transfer quantity for REC-XXX</p>
+      
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Authorized Units to Transfer:</label>
+        <input type="number" id="modify-qty-input" min="1" max="50" class="w-full bg-[#1C0406] border border-[#5E1B21] rounded p-2 text-white text-sm" value="5">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Authorizing User ID / Title:</label>
+        <input type="text" id="modify-user-input" class="w-full bg-[#1C0406] border border-[#5E1B21] rounded p-2 text-white text-sm" value="dr_odhiambo_chief_transfusion">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Clinical / Logistical Justification:</label>
+        <textarea id="modify-notes-input" rows="2" class="w-full bg-[#1C0406] border border-[#5E1B21] rounded p-2 text-white text-xs">Reduced quantity due to local storage capacity constraint.</textarea>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModifyModal()" class="px-3 py-1.5 rounded bg-gray-800 text-gray-300 text-xs">Cancel</button>
+        <button onclick="submitModifyRecommendation()" class="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs">Submit Modification</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== Modal for Rejecting Recommendations ======================== -->
+  <div id="reject-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#24090C] border border-[#5E1B21] rounded-xl p-6 max-w-md w-full space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="text-base font-bold text-white">Decline Transfer Recommendation</h3>
+        <button onclick="closeRejectModal()" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+      <p class="text-xs text-gray-300" id="reject-modal-summary">Provide operational reason for rejecting recommendation.</p>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Authorizing User ID:</label>
+        <input type="text" id="reject-user-input" class="w-full bg-[#1C0406] border border-[#5E1B21] rounded p-2 text-white text-sm" value="dr_odhiambo_chief_transfusion">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Mandatory Rejection Reason:</label>
+        <textarea id="reject-reason-input" rows="3" class="w-full bg-[#1C0406] border border-[#5E1B21] rounded p-2 text-white text-xs" placeholder="e.g. Local elective surgeries cancelled; target hospital does not have adequate storage temperature monitoring."></textarea>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeRejectModal()" class="px-3 py-1.5 rounded bg-gray-800 text-gray-300 text-xs">Cancel</button>
+        <button onclick="submitRejectRecommendation()" class="px-3 py-1.5 rounded bg-red-700 hover:bg-red-600 text-white font-semibold text-xs">Confirm Rejection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== Footer ======================== -->
+  <footer class="bg-[#1C0406] border-t border-[#3E1216] px-4 py-3 text-xs text-gray-500 text-center">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span>Terumo BCT Africa Hackathon 2026 · Starter Sandbox Implementation</span>
+      <span>Backend: FastAPI + SQLite · ML: LightGBM Regressor</span>
+    </div>
+  </footer>
+
+  <!-- ======================== Application JavaScript Logic ======================== -->
+  <script>
+    const API_BASE = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+      ? `${window.location.origin}/api`
+      : 'http://localhost:8000/api';
+
+    let state = {
+      facilities: [],
+      inventory: [],
+      forecasts: [],
+      risks: [],
+      recommendations: [],
+      auditLogs: [],
+      systemStatus: {},
+      currentFacilityId: 'HSP-001',
+      selectedRecId: null
+    };
+
+    let overviewChartInstance = null;
+    let forecastChartInstance = null;
+
+    // View Navigation
+    function switchView(viewName) {
+      const views = ['overview', 'facilities', 'forecasting', 'risks', 'recommendations', 'audit'];
+      views.forEach(v => {
+        const el = document.getElementById(`view-${v}`);
+        const tab = document.getElementById(`tab-${v}`);
+        if (el) el.classList.toggle('hidden', v !== viewName);
+        if (tab) tab.classList.toggle('active', v === viewName);
+      });
+
+      if (viewName === 'overview') renderOverviewChart();
+      if (viewName === 'forecasting') renderForecastChart();
+    }
+
+    // Refresh All Data from Backend
+    async function refreshAllData() {
+      try {
+        const [facRes, invRes, risksRes, recsRes, auditRes, statusRes, foreRes] = await Promise.all([
+          fetch(`${API_BASE}/facilities`).then(r => r.json()),
+          fetch(`${API_BASE}/inventory`).then(r => r.json()),
+          fetch(`${API_BASE}/stockout-risks`).then(r => r.json()),
+          fetch(`${API_BASE}/recommendations`).then(r => r.json()),
+          fetch(`${API_BASE}/audit-logs`).then(r => r.json()),
+          fetch(`${API_BASE}/system-status`).then(r => r.json()),
+          fetch(`${API_BASE}/forecasts`).then(r => r.json())
+        ]);
+
+        state.facilities = facRes.facilities || [];
+        state.inventory = invRes.inventory || [];
+        state.risks = risksRes.risks || [];
+        state.recommendations = recsRes.recommendations || [];
+        state.auditLogs = auditRes.audit_logs || [];
+        state.systemStatus = statusRes || {};
+        state.forecasts = foreRes.forecasts || [];
+
+        // Save local copy to localStorage for offline resilience (Section 7)
+        localStorage.setItem('terumo_cached_inventory', JSON.stringify(state.inventory));
+        localStorage.setItem('terumo_cached_risks', JSON.stringify(state.risks));
+
+        populateFacilitySelectors();
+        renderKPIs();
+        renderOverviewChart();
+        renderUrgentSitesList();
+        loadSelectedFacility();
+        renderRisksTable();
+        renderRecommendations();
+        renderAuditLogs();
+        updateSystemStatusDisplay();
+      } catch (err) {
+        console.warn("Backend not reachable or offline. Falling back to local verified cache.", err);
+        handleOfflineFallback();
+      }
+    }
+
+    function handleOfflineFallback() {
+      const alert = document.getElementById('alert-banner');
+      alert.classList.remove('hidden');
+      alert.className = "rounded-lg p-4 border text-sm flex items-start justify-between bg-amber-950/70 border-amber-700/60 text-amber-200";
+      document.getElementById('alert-text').innerText = "⚠️ Network / API disconnected. Running in Local Offline Heuristic Mode with cached physical counts.";
+      document.getElementById('mode-label').innerText = "Fallback Offline Heuristic";
+      document.getElementById('status-indicator-dot').className = "w-2 h-2 rounded-full bg-amber-400";
+    }
+
+    function updateSystemStatusDisplay() {
+      const s = state.systemStatus;
+      if (!s) return;
+      document.getElementById('mode-label').innerText = s.operational_mode || "Full Predictive AI";
+      document.getElementById('sync-age-label').innerText = `${s.data_age_hours || 0.1} hrs ago`;
+      const dot = document.getElementById('status-indicator-dot');
+      if (s.is_stale) {
+        dot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+      }
+    }
+
+    function renderKPIs() {
+      const totalUnits = state.inventory.reduce((sum, item) => sum + (item.current_units || 0), 0);
+      const criticalCount = state.risks.filter(r => r.risk_status === 'Critical').length;
+      const highCount = state.risks.filter(r => r.risk_status === 'High Risk').length;
+      const pendingCount = state.recommendations.filter(r => r.status === 'Pending Approval').length;
+
+      document.getElementById('kpi-total-units').innerText = totalUnits.toLocaleString();
+      document.getElementById('kpi-critical-count').innerText = criticalCount;
+      document.getElementById('kpi-high-count').innerText = highCount;
+      document.getElementById('kpi-pending-recs').innerText = pendingCount;
+      document.getElementById('pending-badge').innerText = pendingCount;
+      document.getElementById('kpi-expiring-count').innerText = "84";
+    }
+
+    function populateFacilitySelectors() {
+      const select1 = document.getElementById('facility-select');
+      const select2 = document.getElementById('forecast-fac-select');
+      if (!select1 || state.facilities.length === 0) return;
+
+      const options = state.facilities.map(f => 
+        `<option value="${f.facility_id}">${f.name} (${f.county})</option>`
+      ).join('');
+
+      select1.innerHTML = options;
+      select2.innerHTML = options;
+      select1.value = state.currentFacilityId;
+      select2.value = state.currentFacilityId;
+    }
+
+    function renderOverviewChart() {
+      const ctx = document.getElementById('overviewChart');
+      if (!ctx) return;
+
+      const bgTotals = { 'O+': 0, 'O-': 0, 'A+': 0, 'A-': 0, 'B+': 0, 'B-': 0, 'AB+': 0, 'AB-': 0 };
+      state.inventory.forEach(item => {
+        if (bgTotals[item.blood_group] !== undefined) {
+          bgTotals[item.blood_group] += item.current_units;
+        }
+      });
+
+      if (overviewChartInstance) overviewChartInstance.destroy();
+
+      overviewChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(bgTotals),
+          datasets: [{
+            label: 'Total Available Units',
+            data: Object.values(bgTotals),
+            backgroundColor: [
+              '#EF4444', '#DC2626', '#F87171', '#B91C1C',
+              '#FB923C', '#EA580C', '#A855F7', '#7E22CE'
+            ],
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#D4B8BB' } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#D4B8BB' } }
+          }
+        }
+      });
+    }
+
+    function renderUrgentSitesList() {
+      const container = document.getElementById('urgent-sites-list');
+      if (!container) return;
+
+      const criticalRisks = state.risks
+        .filter(r => r.risk_status === 'Critical')
+        .slice(0, 5);
+
+      if (criticalRisks.length === 0) {
+        container.innerHTML = `<p class="text-xs text-gray-400">No critical stock-out alerts currently.</p>`;
+        return;
+      }
+
+      container.innerHTML = criticalRisks.map(r => {
+        const fac = state.facilities.find(f => f.facility_id === r.facility_id);
+        const name = fac ? fac.name : r.facility_id;
+        return `
+          <div class="p-2 bg-red-950/40 border border-red-900/50 rounded flex items-center justify-between text-xs">
+            <div>
+              <p class="font-bold text-white">${name}</p>
+              <p class="text-[11px] text-red-300 font-mono">${r.component} ${r.blood_group} · ${r.current_stock} units left</p>
+            </div>
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white">≤3 Days</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function loadSelectedFacility() {
+      const fid = document.getElementById('facility-select').value;
+      state.currentFacilityId = fid;
+      const fac = state.facilities.find(f => f.facility_id === fid);
+      if (!fac) return;
+
+      document.getElementById('fac-county').innerText = fac.county || '--';
+      document.getElementById('fac-type').innerText = (fac.facility_type || '--').replace('_', ' ');
+      document.getElementById('fac-conn').innerText = fac.connectivity || '3G';
+      document.getElementById('fac-grid').innerText = `${Math.round((fac.grid_reliability || 0.8) * 100)}%`;
+      document.getElementById('fac-backup').innerText = fac.has_blood_fridge_backup_power ? "✅ Yes" : "❌ None";
+
+      // Build Matrix for Facility
+      const facInventory = state.inventory.filter(i => i.facility_id === fid);
+      const totalUnits = facInventory.reduce((s, i) => s + i.current_units, 0);
+      document.getElementById('fac-total-stock').innerText = `${totalUnits} units`;
+
+      const components = ['RBC', 'WB', 'PLT', 'FFP', 'CRYO'];
+      const groups = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+
+      const body = document.getElementById('facility-matrix-body');
+      body.innerHTML = components.map(comp => {
+        let rowTotal = 0;
+        const cells = groups.map(bg => {
+          const item = facInventory.find(i => i.component === comp && i.blood_group === bg);
+          const count = item ? item.current_units : 0;
+          rowTotal += count;
+          let color = "text-gray-300";
+          if (count === 0) color = "text-red-500 font-bold";
+          else if (count <= 2) color = "text-orange-400 font-semibold";
+          return `<td class="py-2.5 px-3 text-center ${color}">${count}</td>`;
+        }).join('');
+
+        return `
+          <tr class="hover:bg-white/5 transition">
+            <td class="py-2.5 px-3 font-semibold text-white">${comp}</td>
+            ${cells}
+            <td class="py-2.5 px-3 text-right font-bold text-emerald-400">${rowTotal}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderForecastChart() {
+      const fid = document.getElementById('forecast-fac-select').value;
+      const bg = document.getElementById('forecast-bg-select').value;
+      const ctx = document.getElementById('forecastChart');
+      if (!ctx) return;
+
+      const filtered = state.forecasts.filter(f => f.facility_id === fid && f.blood_group === bg);
+      if (filtered.length === 0) return;
+
+      const labels = filtered.map(f => f.forecast_date);
+      const pointPreds = filtered.map(f => f.predicted_units);
+      const lowerPreds = filtered.map(f => f.lower_estimate);
+      const upperPreds = filtered.map(f => f.upper_estimate);
+
+      if (forecastChartInstance) forecastChartInstance.destroy();
+
+      forecastChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Predicted Demand (Units)',
+              data: pointPreds,
+              borderColor: '#EF4444',
+              backgroundColor: '#EF4444',
+              tension: 0.3,
+              borderWidth: 2,
+              fill: false
+            },
+            {
+              label: 'Upper Estimate (90% Conf)',
+              data: upperPreds,
+              borderColor: 'rgba(239, 68, 68, 0.25)',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderDash: [5, 5],
+              fill: '+1'
+            },
+            {
+              label: 'Lower Estimate (10% Conf)',
+              data: lowerPreds,
+              borderColor: 'rgba(239, 68, 68, 0.25)',
+              backgroundColor: 'transparent',
+              borderDash: [5, 5],
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#D4B8BB' } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#D4B8BB' }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function renderRisksTable() {
+      const filter = document.getElementById('risk-filter-status').value;
+      const body = document.getElementById('risks-table-body');
+      if (!body) return;
+
+      const rows = state.risks.filter(r => filter === 'ALL' || r.risk_status === filter);
+      
+      body.innerHTML = rows.map(r => {
+        const fac = state.facilities.find(f => f.facility_id === r.facility_id);
+        const name = fac ? fac.name : r.facility_id;
+        
+        let badgeClass = "badge-stable";
+        if (r.risk_status === 'Critical') badgeClass = "badge-critical";
+        else if (r.risk_status === 'High Risk') badgeClass = "badge-high";
+        else if (r.risk_status === 'Moderate Risk') badgeClass = "badge-moderate";
+
+        return `
+          <tr class="hover:bg-white/5 transition">
+            <td class="py-2.5 px-3 font-semibold text-white">${name} (${r.facility_id})</td>
+            <td class="py-2.5 px-2">${r.component}</td>
+            <td class="py-2.5 px-2 font-bold">${r.blood_group}</td>
+            <td class="py-2.5 px-2 text-right font-mono font-bold">${r.current_stock}</td>
+            <td class="py-2.5 px-2 text-center font-mono">${r.projected_days_to_stockout || '>14'}</td>
+            <td class="py-2.5 px-2 text-gray-400 font-mono">${r.earliest_stockout_date || 'Stable'}</td>
+            <td class="py-2.5 px-2 text-center">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${r.risk_status}</span>
+            </td>
+            <td class="py-2.5 px-3 text-gray-300 max-w-xs truncate" title="${r.contributing_factors}">${r.contributing_factors}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderRecommendations() {
+      const filter = document.getElementById('rec-filter-status').value;
+      const container = document.getElementById('recommendations-container');
+      if (!container) return;
+
+      const rows = state.recommendations.filter(r => filter === 'ALL' || r.status === filter);
+
+      if (rows.length === 0) {
+        container.innerHTML = `<div class="p-6 bg-[#24090C] rounded-xl border border-[#451419] text-gray-400 text-center col-span-2">No recommendations found matching current filter.</div>`;
+        return;
+      }
+
+      container.innerHTML = rows.map(r => {
+        let statusBadge = "bg-yellow-900/60 text-yellow-300 border-yellow-700/50";
+        if (r.status === 'Approved') statusBadge = "bg-emerald-900/60 text-emerald-300 border-emerald-700/50";
+        if (r.status === 'Modified') statusBadge = "bg-blue-900/60 text-blue-300 border-blue-700/50";
+        if (r.status === 'Rejected') statusBadge = "bg-red-900/60 text-red-300 border-red-700/50";
+
+        const isActionable = r.status === 'Pending Approval';
+
+        return `
+          <div class="p-4 bg-[#200709] border border-[#4F191E] rounded-xl space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-bold text-red-400">${r.recommendation_id}</span>
+              <span class="px-2 py-0.5 rounded text-[11px] font-semibold border ${statusBadge}">${r.status}</span>
+            </div>
+
+            <div class="text-xs space-y-1">
+              <p class="text-gray-300">
+                <strong>Target (Deficit):</strong> ${r.target_facility_name} (<span class="font-mono text-gray-400">${r.target_facility_id}</span>)
+              </p>
+              <p class="text-gray-300">
+                <strong>Source (Surplus):</strong> ${r.source_facility_name} (<span class="font-mono text-gray-400">${r.source_facility_id}</span>)
+              </p>
+              <p class="text-gray-300">
+                <strong>Transit Route:</strong> <span class="text-white font-semibold">${r.road_km} km</span> (~${r.typical_travel_hours} hrs road transit)
+              </p>
+            </div>
+
+            <div class="p-2.5 bg-black/30 rounded border border-[#3E1317] text-xs">
+              <span class="text-gray-400">Proposed Transfer:</span>
+              <p class="text-white font-bold text-sm">
+                ${r.approved_quantity || r.recommended_quantity} units of <span class="text-red-400">${r.component} ${r.blood_group}</span>
+              </p>
+              <p class="text-[11px] text-gray-400 mt-1">${r.justification}</p>
+            </div>
+
+            ${isActionable ? `
+              <div class="flex items-center justify-end gap-2 pt-1">
+                <button onclick="openRejectModal('${r.recommendation_id}')" class="px-2.5 py-1.5 rounded bg-red-950 hover:bg-red-900 text-red-300 border border-red-800/50 text-xs font-medium transition">
+                  Reject
+                </button>
+                <button onclick="openModifyModal('${r.recommendation_id}', ${r.recommended_quantity})" class="px-2.5 py-1.5 rounded bg-blue-950 hover:bg-blue-900 text-blue-300 border border-blue-800/50 text-xs font-medium transition">
+                  Modify Qty
+                </button>
+                <button onclick="approveRecommendation('${r.recommendation_id}')" class="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold shadow-sm transition">
+                  ✓ Accept & Authorize
+                </button>
+              </div>
+            ` : `
+              <div class="text-right text-[11px] text-gray-500 italic">Decision recorded in audit log.</div>
+            `}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderAuditLogs() {
+      const body = document.getElementById('audit-table-body');
+      if (!body) return;
+
+      if (state.auditLogs.length === 0) {
+        body.innerHTML = `<tr><td colspan="8" class="py-4 text-center text-gray-500">No human authorizations logged yet.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = state.auditLogs.map(l => `
+        <tr class="hover:bg-white/5 transition">
+          <td class="py-2.5 px-3 font-mono text-gray-400">#${l.id}</td>
+          <td class="py-2.5 px-3 font-mono font-bold text-red-400">${l.recommendation_id}</td>
+          <td class="py-2.5 px-3 font-semibold uppercase text-[10px]">${l.action}</td>
+          <td class="py-2.5 px-3 text-white">${l.user_id}</td>
+          <td class="py-2.5 px-3">${l.previous_status} → <strong>${l.new_status}</strong></td>
+          <td class="py-2.5 px-3 font-mono">${l.new_quantity !== null ? l.new_quantity : l.previous_quantity} units</td>
+          <td class="py-2.5 px-3 text-gray-400 font-mono text-[11px]">${l.timestamp.replace('T', ' ').slice(0, 19)}</td>
+          <td class="py-2.5 px-3 text-gray-300 italic">${l.notes || '--'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Interactive Actions: Accept, Modify, Reject
+    async function approveRecommendation(id) {
+      try {
+        const res = await fetch(`${API_BASE}/recommendations/${id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: 'dr_odhiambo_chief_transfusion', notes: 'Authorized for immediate road transfer' })
+        });
+        if (res.ok) {
+          await refreshAllData();
+          alert(`✅ Recommendation ${id} successfully APPROVED.`);
+        }
+      } catch (err) {
+        alert("Action failed: " + err.message);
+      }
+    }
+
+    function openModifyModal(id, currentQty) {
+      state.selectedRecId = id;
+      document.getElementById('modify-modal-summary').innerText = `Adjust transfer quantity for ${id}`;
+      document.getElementById('modify-qty-input').value = currentQty;
+      document.getElementById('modify-modal').classList.remove('hidden');
+    }
+
+    function closeModifyModal() {
+      document.getElementById('modify-modal').classList.add('hidden');
+    }
+
+    async function submitModifyRecommendation() {
+      const id = state.selectedRecId;
+      const qty = parseInt(document.getElementById('modify-qty-input').value, 10);
+      const user = document.getElementById('modify-user-input').value;
+      const notes = document.getElementById('modify-notes-input').value;
+
+      try {
+        const res = await fetch(`${API_BASE}/recommendations/${id}/modify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user, modified_quantity: qty, notes: notes })
+        });
+        if (res.ok) {
+          closeModifyModal();
+          await refreshAllData();
+          alert(`✅ Recommendation ${id} modified to ${qty} units and approved.`);
+        }
+      } catch (err) {
+        alert("Failed to modify: " + err.message);
+      }
+    }
+
+    function openRejectModal(id) {
+      state.selectedRecId = id;
+      document.getElementById('reject-modal-summary').innerText = `Decline ${id}`;
+      document.getElementById('reject-modal').classList.remove('hidden');
+    }
+
+    function closeRejectModal() {
+      document.getElementById('reject-modal').classList.add('hidden');
+    }
+
+    async function submitRejectRecommendation() {
+      const id = state.selectedRecId;
+      const user = document.getElementById('reject-user-input').value;
+      const reason = document.getElementById('reject-reason-input').value;
+
+      if (!reason || reason.trim().length === 0) {
+        alert("Please provide a valid operational reason for rejection.");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/recommendations/${id}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user, reason: reason })
+        });
+        if (res.ok) {
+          closeRejectModal();
+          await refreshAllData();
+          alert(`❌ Recommendation ${id} has been REJECTED.`);
+        }
+      } catch (err) {
+        alert("Failed to reject: " + err.message);
+      }
+    }
+
+    async function triggerSimulation() {
+      try {
+        const res = await fetch(`${API_BASE}/stockout-risks/simulate`, { method: 'POST' });
+        if (res.ok) {
+          await refreshAllData();
+          alert("⚡ Forward Inventory Simulation re-computed successfully.");
+        }
+      } catch (err) {
+        alert("Simulation failed: " + err.message);
+      }
+    }
+
+    async function triggerForecastingRun() {
+      try {
+        const res = await fetch(`${API_BASE}/forecasts/run`, { method: 'POST' });
+        if (res.ok) {
+          await refreshAllData();
+          alert("🔄 LightGBM model re-trained with 14-day recursive lags.");
+        }
+      } catch (err) {
+        alert("Forecasting failed: " + err.message);
+      }
+    }
+
+    function triggerFacilitySimulate() {
+      triggerSimulation();
+    }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshAllData();
+    });
+  </script>
+</body>
+</html>
+

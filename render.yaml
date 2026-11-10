@@ -1,0 +1,24 @@
+services:
+  # FastAPI REST Backend Service
+  - type: web
+    name: terumo-blood-intelligence-backend
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt && python gitcodes/ingestion.py"
+    startCommand: "uvicorn api:app --app-dir gitcodes --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  # Next.js Frontend Dashboard Service
+  - type: web
+    name: terumo-blood-intelligence-ui
+    env: node
+    plan: free
+    rootDir: ui
+    buildCommand: "pnpm install && pnpm build"
+    startCommand: "pnpm start --port $PORT"
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+

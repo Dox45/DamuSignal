@@ -1,3 +1,5 @@
+import gzip
+import json
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -7,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Tuple, Dict, Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 def find_data_file(filename: str) -> Path:
     candidates = [BASE_DIR / filename, Path(filename), Path("..") / filename]
@@ -19,21 +22,28 @@ def train_and_forecast_demand(horizon_days: int = 14) -> Tuple[pd.DataFrame, Dic
     """
     Trains LightGBM demand forecasting model with recursive roll-forward feature generation
     and compares against a 7-day moving average baseline.
+    Falls back to embedded pre-aggregated daily_demand.json.gz when raw requests.csv is excluded (e.g. Render).
     Returns:
         forecast_df: Projected daily demand per facility and blood group with confidence intervals.
         metrics: Evaluation results on chronological holdout set.
     """
-    req_df = pd.read_csv(find_data_file('requests.csv'))
-    bg_col = 'blood_group' if 'blood_group' in req_df.columns else [c for c in req_df.columns if 'group' in c or 'type' in c][0]
-    
-    # Exclude invalid/unknown blood groups for model training
     valid_bgs = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-']
-    req_df = req_df[req_df[bg_col].isin(valid_bgs)].copy()
-    
-    req_df['requested_at'] = pd.to_datetime(req_df['requested_at'])
-    req_df['date'] = pd.to_datetime(req_df['requested_at'].dt.date)
-    
-    daily_req = req_df.groupby(['date', 'facility_id', bg_col])['units_requested'].sum().reset_index()
+    req_path = find_data_file('requests.csv')
+    demand_fixture = FIXTURES_DIR / "daily_demand.json.gz"
+
+    if req_path.exists():
+        req_df = pd.read_csv(req_path)
+        bg_col = 'blood_group' if 'blood_group' in req_df.columns else [c for c in req_df.columns if 'group' in c or 'type' in c][0]
+        req_df = req_df[req_df[bg_col].isin(valid_bgs)].copy()
+        req_df['requested_at'] = pd.to_datetime(req_df['requested_at'])
+        req_df['date'] = pd.to_datetime(req_df['requested_at'].dt.date)
+        daily_req = req_df.groupby(['date', 'facility_id', bg_col])['units_requested'].sum().reset_index().rename(columns={bg_col: 'blood_group'})
+    elif demand_fixture.exists():
+        with gzip.open(demand_fixture, 'rt', encoding='utf-8') as f:
+            daily_req = pd.DataFrame(json.load(f))
+        daily_req['date'] = pd.to_datetime(daily_req['date'])
+    else:
+        raise FileNotFoundError("Neither requests.csv nor daily_demand.json.gz fixture was found.")
     
     # Complete time grid
     idx = pd.date_range(daily_req['date'].min(), daily_req['date'].max())
@@ -45,7 +55,7 @@ def train_and_forecast_demand(horizon_days: int = 14) -> Tuple[pd.DataFrame, Dic
     
     df_demand = pd.merge(
         df_grid, 
-        daily_req.rename(columns={bg_col: 'blood_group'}), 
+        daily_req, 
         on=['date', 'facility_id', 'blood_group'], 
         how='left'
     ).fillna({'units_requested': 0})

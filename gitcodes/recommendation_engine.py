@@ -1,10 +1,15 @@
+import gzip
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 
+from database import get_connection
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 def find_data_file(filename: str) -> Path:
     candidates = [BASE_DIR / filename, Path(filename), Path("..") / filename]
@@ -16,14 +21,29 @@ def find_data_file(filename: str) -> Path:
 def generate_recommendations(risk_summary_df: pd.DataFrame, max_recommendations: int = 30) -> pd.DataFrame:
     """
     Generates intelligent inter-facility blood transfer recommendations.
-    Uses routes.csv to find the closest surplus facility by road travel time.
+    Uses routes.csv (or embedded routes.json.gz) to find the closest surplus facility by road travel time.
     Maintains a safety reserve at source facilities and formats actionable recommendations
     with justification for human-in-the-loop approval.
     """
-    fac_df = pd.read_csv(find_data_file('facilities.csv'))
-    facility_names = dict(zip(fac_df['facility_id'], fac_df['name']))
-    
-    routes_df = pd.read_csv(find_data_file('routes.csv'))
+    fac_path = find_data_file('facilities.csv')
+    if fac_path.exists():
+        fac_df = pd.read_csv(fac_path)
+        facility_names = dict(zip(fac_df['facility_id'], fac_df['name']))
+    else:
+        conn = get_connection()
+        rows = conn.cursor().execute("SELECT facility_id, name FROM facilities").fetchall()
+        conn.close()
+        facility_names = {r['facility_id']: r['name'] for r in rows}
+
+    routes_path = find_data_file('routes.csv')
+    routes_fixture = FIXTURES_DIR / "routes.json.gz"
+    if routes_path.exists():
+        routes_df = pd.read_csv(routes_path)
+    elif routes_fixture.exists():
+        with gzip.open(routes_fixture, 'rt', encoding='utf-8') as f:
+            routes_df = pd.DataFrame(json.load(f))
+    else:
+        routes_df = pd.DataFrame(columns=['from_facility_id', 'to_facility_id', 'road_km', 'typical_travel_hours'])
     # Fast route lookup: (from_id, to_id) -> (road_km, typical_travel_hours)
     route_map = {}
     for r in routes_df.itertuples():

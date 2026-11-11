@@ -357,8 +357,8 @@ export default function DashboardPage() {
   }, [forecasts, selectedFacilityId, selectedForecastBg]);
 
   const maxForecastVal = Math.max(
-    ...currentForecastData.map((f) => f.upper_estimate),
-    10
+    ...currentForecastData.map((f) => f.upper_estimate || 0),
+    1
   );
 
   // Human-in-the-Loop Actions
@@ -1073,37 +1073,61 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              {/* Dynamic SVG Forecast Chart */}
-              <div className="h-64 w-full bg-black/30 rounded-xl border border-white/5 p-4 flex flex-col justify-between">
-                <div className="flex-1 flex items-end gap-2 pt-6 pb-2">
-                  {currentForecastData.map((f) => {
-                    const heightPct = Math.round((f.predicted_units / maxForecastVal) * 100);
-                    const upperPct = Math.round((f.upper_estimate / maxForecastVal) * 100);
-                    return (
-                      <div key={f.forecast_date} className="flex-1 flex flex-col items-center gap-1 group relative">
-                        {/* Tooltip on hover */}
-                        <div className="absolute -top-14 opacity-0 group-hover:opacity-100 transition-opacity bg-black border border-red-800 text-white text-[10px] p-1.5 rounded pointer-events-none whitespace-nowrap z-20 shadow-xl font-mono">
-                          {f.forecast_date}
-                          <br />
-                          Pred: {f.predicted_units}u (±{f.upper_estimate})
+              {/* Dynamic Bar + Confidence Interval Forecast Chart */}
+              <div className="h-72 w-full bg-black/30 rounded-xl border border-white/5 p-4 flex flex-col justify-between">
+                {currentForecastData.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-gray-400 text-xs gap-2">
+                    <LineChart className="w-8 h-8 text-red-500/60" />
+                    <p>No forecast points loaded for {selectedFacilityId} ({selectedForecastBg}).</p>
+                    <button
+                      onClick={handleRetrainForecast}
+                      disabled={actionLoading}
+                      className="px-3 py-1.5 rounded-lg bg-red-800/60 hover:bg-red-700 text-white font-semibold"
+                    >
+                      Generate 14-Day Forecast
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 h-full flex items-end gap-2 pt-6 pb-1 min-h-0">
+                    {currentForecastData.map((f) => {
+                      const upperPct = Math.min(100, Math.max(8, Math.round((f.upper_estimate / maxForecastVal) * 100)));
+                      const heightPct = Math.max(4, Math.min(upperPct, Math.round((f.predicted_units / maxForecastVal) * 100)));
+                      const bandDeltaPct = Math.max(0, upperPct - heightPct);
+                      return (
+                        <div key={f.forecast_date} className="flex-1 h-full flex flex-col items-center justify-end gap-1 group relative min-w-0">
+                          {/* Tooltip on hover */}
+                          <div className="absolute -top-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black border border-red-800 text-white text-[10px] p-1.5 rounded pointer-events-none whitespace-nowrap z-20 shadow-xl font-mono">
+                            {f.forecast_date}
+                            <br />
+                            Pred: {f.predicted_units.toFixed(2)}u [{f.lower_estimate.toFixed(2)}–{f.upper_estimate.toFixed(2)}]
+                          </div>
+                          {/* Numeric value above bar */}
+                          <span className="text-[9px] font-mono text-gray-300">
+                            {f.predicted_units.toFixed(1)}
+                          </span>
+                          {/* Stacked Chart Column inside explicit flex-1 height container */}
+                          <div className="w-full flex-1 flex flex-col justify-end items-center min-h-0">
+                            {/* Upper 90% confidence interval band */}
+                            {bandDeltaPct > 0 && (
+                              <div
+                                className="w-full bg-red-950/70 rounded-t border-t border-x border-dashed border-red-400/60"
+                                style={{ height: `${bandDeltaPct}%` }}
+                              />
+                            )}
+                            {/* Predicted Demand bar */}
+                            <div
+                              className={`w-full bg-gradient-to-t from-red-700 to-red-500 shadow-sm ${bandDeltaPct === 0 ? 'rounded-t' : ''} rounded-b-sm`}
+                              style={{ height: `${heightPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[9px] text-gray-400 font-mono truncate w-full text-center pt-1">
+                            {f.forecast_date.slice(5)}
+                          </span>
                         </div>
-                        {/* Upper bound indicator */}
-                        <div
-                          className="w-full bg-red-950/60 rounded-t border-t border-dashed border-red-500/50"
-                          style={{ height: `${Math.max(upperPct - heightPct, 4)}%` }}
-                        />
-                        {/* Predicted Demand bar */}
-                        <div
-                          className="w-full bg-gradient-to-t from-red-700 to-red-500 rounded-t"
-                          style={{ height: `${Math.max(heightPct, 8)}%` }}
-                        />
-                        <span className="text-[9px] text-gray-400 font-mono truncate w-full text-center">
-                          {f.forecast_date.slice(5)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>

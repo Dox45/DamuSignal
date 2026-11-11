@@ -86,15 +86,16 @@ class LoginRequest(BaseModel):
 
 @app.on_event("startup")
 def startup_event():
-    """Initializes SQLite schema and automatically seeds tables if empty."""
+    """Initializes SQLite schema and automatically seeds tables if empty (works with or without CSVs)."""
     init_db()
     conn = get_connection()
-    count = conn.cursor().execute("SELECT count(*) FROM facilities").fetchone()[0]
+    fac_count = conn.cursor().execute("SELECT count(*) FROM facilities").fetchone()[0]
+    fore_count = conn.cursor().execute("SELECT count(*) FROM demand_forecasts").fetchone()[0]
     conn.close()
-    if count == 0 and (BASE_DIR / "facilities.csv").exists():
+    if fac_count == 0 or fore_count == 0:
         from ingestion import run_pipeline
         try:
-            print("[Render Deployment Initialization] Empty database detected. Seeding from datasets...")
+            print("[Render Deployment Initialization] Empty tables detected. Seeding database...")
             run_pipeline()
         except Exception as e:
             print(f"[Render Deployment Initialization] Pipeline run notice: {e}")

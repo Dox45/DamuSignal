@@ -42,7 +42,7 @@ def load_seed_fixture():
     print("✅ Seeded verified 47-facility inventory and forecast network from starter fixture.")
 
 def export_seed_fixture():
-    """Refreshes the compressed starter snapshot from current SQLite tables."""
+    """Refreshes compressed cloud starter and engine fixtures from SQLite and raw CSVs."""
     conn = get_connection()
     cursor = conn.cursor()
     tables = ['facilities', 'inventory_positions', 'demand_forecasts', 'stockout_risks', 'recommendations', 'audit_logs', 'system_status']
@@ -53,10 +53,54 @@ def export_seed_fixture():
         data[t] = [dict(zip(cols, r)) for r in cursor.fetchall()]
     conn.close()
     
-    FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fixtures_dir = FIXTURE_PATH.parent
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
     with gzip.open(FIXTURE_PATH, 'wt', encoding='utf-8') as f:
         json.dump(data, f)
-    print(f"📦 Exported updated starter snapshot to {FIXTURE_PATH.name} ({os.path.getsize(FIXTURE_PATH)/1024:.1f} KB)")
+
+    # Also export compact engine inputs so forecasting/simulation/routing run on Render without raw CSVs
+    req_path = find_data_file('requests.csv')
+    if req_path.exists():
+        req_df = pd.read_csv(req_path)
+        bg_col = 'blood_group' if 'blood_group' in req_df.columns else [c for c in req_df.columns if 'group' in c or 'type' in c][0]
+        valid_bgs = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-']
+        req_df = req_df[req_df[bg_col].isin(valid_bgs)].copy()
+        req_df['date'] = pd.to_datetime(req_df['requested_at']).dt.strftime('%Y-%m-%d')
+        daily_req = req_df.groupby(['date', 'facility_id', bg_col])['units_requested'].sum().reset_index().rename(columns={bg_col: 'blood_group'})
+        with gzip.open(fixtures_dir / 'daily_demand.json.gz', 'wt', encoding='utf-8') as f:
+            json.dump(daily_req.to_dict(orient='records'), f)
+
+    stock_path = find_data_file('daily_stock.csv')
+    units_path = find_data_file('units.csv')
+    if stock_path.exists() and units_path.exists():
+        stock_df = pd.read_csv(stock_path)
+        stock_df['date'] = pd.to_datetime(stock_df['date'])
+        latest_date = stock_df['date'].max()
+        latest_stock = stock_df[stock_df['date'] == latest_date].groupby(['facility_id', 'component', 'blood_group'])['units_in_stock_end_of_day'].sum().reset_index()
+
+        units_df = pd.read_csv(units_path)
+        active_units = units_df[(units_df['status'].isin(['in_stock', 'issued', 'quarantine'])) | (units_df['status_date'] >= latest_date.strftime('%Y-%m-%d'))].copy()
+        active_units['expiry_date'] = pd.to_datetime(active_units['expiry_date'])
+        min_proj = latest_date + pd.Timedelta(days=1)
+        max_proj = latest_date + pd.Timedelta(days=14)
+        expiring_window = active_units[(active_units['expiry_date'] >= min_proj) & (active_units['expiry_date'] <= max_proj)].copy()
+        expiring_window['exp_date_str'] = expiring_window['expiry_date'].dt.strftime('%Y-%m-%d')
+        exp_agg = expiring_window.groupby(['current_facility_id', 'component', 'blood_group', 'exp_date_str']).size().reset_index(name='expiring_count')
+        sim_payload = {
+            'latest_date': latest_date.strftime('%Y-%m-%d'),
+            'latest_stock': latest_stock.to_dict(orient='records'),
+            'expiring_counts': exp_agg.to_dict(orient='records')
+        }
+        with gzip.open(fixtures_dir / 'sim_inputs.json.gz', 'wt', encoding='utf-8') as f:
+            json.dump(sim_payload, f)
+
+    routes_path = find_data_file('routes.csv')
+    if routes_path.exists():
+        routes_df = pd.read_csv(routes_path)
+        with gzip.open(fixtures_dir / 'routes.json.gz', 'wt', encoding='utf-8') as f:
+            json.dump(routes_df.to_dict(orient='records'), f)
+
+    print(f"📦 Exported updated cloud fixtures into {fixtures_dir.name}/")
 
 def seed_facilities_table():
     """Populates the facilities table from facilities.csv."""

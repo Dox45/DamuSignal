@@ -1,6 +1,6 @@
 # Blood Inventory Intelligence & Early Warning System
 
-Terumo BCT Africa Hackathon 2026 · Challenge area: Stock-outs, Emergency Access & Redistribution
+Terumo BCT Africa Hackathon 2026 · Challenge area: Demand Forecasting & Stock-outs
 
 ## The problem
 In Kenya’s national blood transfusion system, regional blood transfusion centres (RBTCs) and hospital blood bank managers—such as **Dr. Amina Odhiambo** (Regional Transfusion Officer)—struggle to anticipate acute shortages before they happen. Today, management is purely reactive: hospitals only sound the alarm when their blood bank is empty. Emergency couriers take a median of **5 hours** (much longer in remote counties). 

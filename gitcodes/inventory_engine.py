@@ -1,3 +1,5 @@
+import gzip
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -5,6 +7,7 @@ from datetime import datetime
 from typing import Tuple, List, Dict, Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 def find_data_file(filename: str) -> Path:
     candidates = [BASE_DIR / filename, Path(filename), Path("..") / filename]
@@ -19,46 +22,64 @@ def simulate_inventory_and_risks(forecast_df: pd.DataFrame, horizon_days: int = 
     - Base inventory from daily_stock.csv at latest snapshot
     - Unit expirations dynamically tracked from units.csv
     - Forecasted demand from forecast_df
+    Falls back to embedded sim_inputs.json.gz when raw CSVs are excluded (e.g. Render).
     Returns:
         risk_summary_df: Risk categorization, days to stockout, and explanatory evidence.
         inventory_positions_df: Latest verified inventory positions per facility, component, group.
     """
-    stock_df = pd.read_csv(find_data_file('daily_stock.csv'))
-    stock_df['date'] = pd.to_datetime(stock_df['date'])
-    latest_date = stock_df['date'].max()
-    
-    # Filter to latest date snapshot
-    latest_stock = stock_df[stock_df['date'] == latest_date].copy()
-    
-    inventory_positions_df = latest_stock.groupby(
-        ['facility_id', 'component', 'blood_group']
-    )['units_in_stock_end_of_day'].sum().reset_index().rename(
-        columns={'units_in_stock_end_of_day': 'current_units'}
-    )
-    inventory_positions_df['last_updated'] = latest_date.strftime('%Y-%m-%d')
-    
-    # Expiry tracking from units.csv
-    units_df = pd.read_csv(find_data_file('units.csv'))
-    # Filter for usable units in stock at latest date
-    active_units = units_df[
-        (units_df['status'].isin(['in_stock', 'issued', 'quarantine'])) | 
-        (units_df['status_date'] >= latest_date.strftime('%Y-%m-%d'))
-    ].copy()
-    active_units['expiry_date'] = pd.to_datetime(active_units['expiry_date'])
-    
-    projection_dates = pd.date_range(start=latest_date + pd.Timedelta(days=1), periods=horizon_days)
-    min_proj = projection_dates.min()
-    max_proj = projection_dates.max()
+    stock_path = find_data_file('daily_stock.csv')
+    units_path = find_data_file('units.csv')
+    sim_fixture = FIXTURES_DIR / "sim_inputs.json.gz"
 
-    # Pre-aggregate expiring units by (facility_id, component, blood_group, expiry_date_str)
-    expiring_window = active_units[
-        (active_units['expiry_date'] >= min_proj) &
-        (active_units['expiry_date'] <= max_proj)
-    ].copy()
-    expiring_window['exp_date_str'] = expiring_window['expiry_date'].dt.strftime('%Y-%m-%d')
-    exp_counts = expiring_window.groupby(
-        ['current_facility_id', 'component', 'blood_group', 'exp_date_str']
-    ).size().to_dict()
+    if stock_path.exists() and units_path.exists():
+        stock_df = pd.read_csv(stock_path)
+        stock_df['date'] = pd.to_datetime(stock_df['date'])
+        latest_date = stock_df['date'].max()
+
+        latest_stock = stock_df[stock_df['date'] == latest_date].copy()
+        inventory_positions_df = latest_stock.groupby(
+            ['facility_id', 'component', 'blood_group']
+        )['units_in_stock_end_of_day'].sum().reset_index().rename(
+            columns={'units_in_stock_end_of_day': 'current_units'}
+        )
+        inventory_positions_df['last_updated'] = latest_date.strftime('%Y-%m-%d')
+
+        units_df = pd.read_csv(units_path)
+        active_units = units_df[
+            (units_df['status'].isin(['in_stock', 'issued', 'quarantine'])) |
+            (units_df['status_date'] >= latest_date.strftime('%Y-%m-%d'))
+        ].copy()
+        active_units['expiry_date'] = pd.to_datetime(active_units['expiry_date'])
+
+        projection_dates = pd.date_range(start=latest_date + pd.Timedelta(days=1), periods=horizon_days)
+        min_proj = projection_dates.min()
+        max_proj = projection_dates.max()
+
+        expiring_window = active_units[
+            (active_units['expiry_date'] >= min_proj) &
+            (active_units['expiry_date'] <= max_proj)
+        ].copy()
+        expiring_window['exp_date_str'] = expiring_window['expiry_date'].dt.strftime('%Y-%m-%d')
+        exp_counts = expiring_window.groupby(
+            ['current_facility_id', 'component', 'blood_group', 'exp_date_str']
+        ).size().to_dict()
+    elif sim_fixture.exists():
+        with gzip.open(sim_fixture, 'rt', encoding='utf-8') as f:
+            payload = json.load(f)
+        latest_date = pd.to_datetime(payload['latest_date'])
+        projection_dates = pd.date_range(start=latest_date + pd.Timedelta(days=1), periods=horizon_days)
+
+        inventory_positions_df = pd.DataFrame(payload['latest_stock']).rename(
+            columns={'units_in_stock_end_of_day': 'current_units'}
+        )
+        inventory_positions_df['last_updated'] = latest_date.strftime('%Y-%m-%d')
+
+        exp_counts = {
+            (r['current_facility_id'], r['component'], r['blood_group'], r['exp_date_str']): r['expiring_count']
+            for r in payload.get('expiring_counts', [])
+        }
+    else:
+        raise FileNotFoundError("Neither daily_stock.csv/units.csv nor sim_inputs.json.gz fixture was found.")
 
     # Map forecast demand per facility and blood group
     comp_demand_weights = {

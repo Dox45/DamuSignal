@@ -3,7 +3,8 @@
 Terumo BCT Africa Hackathon 2026 · Challenge area: Stock-out early warning and forecasting
 
 **Demo video:** https://drive.google.com/file/d/1k8oFinUFC9XB4kND7L10g6w4S2kaU8fX/view?usp=sharing  
-**Live demo:** https://damusignal.vercel.app · Test log-in: dr_odhiambo / bloodbank2026
+**Live demo:** https://damusignal.vercel.app · Test log-in: dr_odhiambo / bloodbank2026  
+**Pitch deck:** https://drive.google.com/file/d/1JrZhpXXuhHCr48i_EAeD20P0oQdr3Keq/view?usp=sharing
 
 ## The problem
 **User:** a Regional Transfusion Officer at a regional blood transfusion centre (our persona is "Dr. Amina Odhiambo"), who supplies county hospitals 1 to 3 times a week. 

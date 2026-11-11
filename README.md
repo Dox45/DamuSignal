@@ -25,7 +25,7 @@ Meanwhile, dataset figures reveal significant system friction:
   - Direct live Bluetooth integration with cold-chain fridge loggers (currently parsed from CSV logs).
 
 Demo video (3 minutes or less): [Demo Video Link]  
-Live demo: http://localhost:3000 · Test log-in: dr_odhiambo / bloodbank2026
+Live demo: https://damusignal.vercel.app · Test log-in: dr_odhiambo / bloodbank2026
 
 ## How to run it
 Step-by-step commands (tested on Linux / Mac / Windows):
@@ -48,12 +48,71 @@ Step-by-step commands (tested on Linux / Mac / Windows):
    ```
 
 ## Architecture
-See architecture diagram in `HACKATHON_DEMO_GUIDE.md`.
+
+The diagram below shows the system's internal components, data flows, offline fallback path, and where our predictive decision-support workflow sits within the wider national blood transfusion system (preserving strict human control and clinical/laboratory boundaries).
+
+```mermaid
+flowchart TB
+    subgraph Wider_Upstream ["1. Wider Blood System: Upstream Field Operations"]
+        U1["Donor Drives & Collections (donors.csv, drives.csv, donations.csv)"]
+        U2["47 RBTCs & Hospital Blood Banks (facilities.csv, daily_stock.csv, units.csv)"]
+        U3["Hospital Transfusion Orders (requests.csv: 17,430 orders)"]
+        U4["Cold-Chain & Grid Telemetry (temperature_logs.csv, power_outages.csv)"]
+        U5["National Road Network (routes.csv: 2,162 links & transit hrs)"]
+    end
+
+    subgraph Core_Ingestion ["2. Data Ingestion & Persistence Layer"]
+        ING["ingestion.py: Clean, Validate & Separate Components (RBC, WB, PLT, FFP, CRYO)"]
+        SEED["Cloud Fallback: starter_seed.json.gz (58.1 KB)"]
+        DB[("database.py -> SQLite blood_inventory.db (7 Tables)")]
+    end
+
+    subgraph Predictive_Engine ["3. AI, Simulation & Resilience Engines"]
+        FORE["forecasting.py: LightGBM 14-Day Recursive Forecast vs 7-Day MA Baseline"]
+        INV["inventory_engine.py: Daily Depletion + Unit Expiry Simulation"]
+        REC["recommendation_engine.py: Surplus-to-Deficit Match (15-Unit Reserve & Road Hours)"]
+        OFF["offline_guard.py: >24h Staleness Check & Deterministic Fallback Heuristic"]
+        LLM["llm_assistant.py: Grounded Bilingual Dispatch Brief & Donor Appeal Drafts"]
+    end
+
+    subgraph API_UI ["4. Secured API & Operator Console"]
+        API["api.py: FastAPI REST API + Bearer Token Auth + Immutable Audit Trail"]
+        UI["Operator Dashboard: Next.js (ui/src/app/page.tsx) & HTML (frontend/index.html)"]
+    end
+
+    subgraph Wider_Downstream ["5. Wider Blood System: Human Control & Downstream Execution"]
+        HITL["Human-in-the-Loop Gate: Transfusion Officer (Accept / Modify / Reject)"]
+        LOG["Physical Courier Dispatch (+2C to +6C Cold Chain) & Staff-Approved Donor SMS"]
+        CLINIC["Hard Clinical Boundary: Qualified Lab Cross-Match, Quarantine & Unit Release (AI Never Touches)"]
+        STD["Interoperability Standards: ISBT 128 Unit IDs | HL7 FHIR SupplyRequest | DHIS2 Reports"]
+    end
+
+    U1 & U2 & U3 & U4 & U5 -->|"Telemetry & Orders"| ING
+    SEED -.->|"If CSVs absent (Render)"| DB
+    ING -->|"Validated State"| DB
+    DB -->|"Historical Demand"| FORE
+    FORE -->|"14-Day Forecast + 10%/90% Bounds"| INV
+    DB -->|"Usable Stock & Expiring Units"| INV
+    INV -->|"Critical/High-Risk Deficits"| REC
+    DB -->|"Road Routes & Donor Surplus"| REC
+    DB -->|"Sync Timestamp"| OFF
+    OFF -.->|"If >24h Stale or ML Offline"| UI
+    REC -->|"Pending Transfer Proposals"| API
+    INV & FORE -->|"Risk Evidence & Metrics"| API
+    DB <-->|"Approve / Modify / Reject Logs"| API
+    API <-->|"Authenticated HTTPS / JSON"| LLM
+    API <-->|"Bearer Auth REST"| UI
+    UI -->|"Plain-Language Evidence"| HITL
+    HITL -->|"Signed Decision Logged"| API
+    HITL -->|"Authorized Movement"| LOG
+    HITL -->|"Staff-Reviewed Only"| CLINIC
+    DB -.->|"Standardized Schema Mapping"| STD
+```
 
 - **Data Layer**: SQLite database (`blood_inventory.db`) with tables for facilities, inventory, demand forecasts, stockout risks, recommendations, and audit logs.
 - **Machine Learning Layer**: LightGBM Regressor with time-series feature engineering and 7-day moving average baseline benchmark.
-- **API Services**: FastAPI backend exposing REST endpoints with CORS support.
-- **User Interface**: Next.js 16 App Router (TypeScript, Tailwind CSS, Lucide Icons).
+- **API Services**: FastAPI backend exposing REST endpoints with Bearer token authentication and CORS support.
+- **User Interface**: Next.js 16 App Router (TypeScript, Tailwind CSS, Lucide Icons) and standalone HTML dashboard.
 - **Standards Mapping**:
   - **ISBT 128**: Blood unit identifiers follow standard donation and sequence coding.
   - **HL7 FHIR**: Transfer requests map to `SupplyRequest` and `SupplyDelivery` resources.
@@ -95,7 +154,7 @@ Using chronological backtesting on the starter dataset across Kenya's 47 facilit
 | Name | Role | Country | Presenting Friday (in person / online) |
 |------|------|---------|-----------------------------------------|
 | Chima Emmanuel | Lead Developer / ML Engineer | Nigeria | Online |
-| 
+| Ayomide Agbaje | ML Engineer | Rwanda | Online |
 
 ## Known limits and next steps
 - Add SMS dispatch integration for drivers via Africa's Talking.

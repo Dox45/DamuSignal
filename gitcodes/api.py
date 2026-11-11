@@ -229,8 +229,9 @@ def get_forecasts(facility_id: Optional[str] = None, blood_group: Optional[str] 
         query += " AND facility_id = ?"
         params.append(facility_id)
     if blood_group:
+        normalized_bg = blood_group.replace(" ", "+")
         query += " AND blood_group = ?"
-        params.append(blood_group)
+        params.append(normalized_bg)
         
     query += " ORDER BY forecast_date ASC, horizon_day ASC"
     
@@ -248,18 +249,18 @@ def trigger_demand_forecasting(horizon_days: int = 14):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Replace demand_forecasts table contents with latest projection
+    # Replace demand_forecasts table contents using batched executemany
     cursor.execute("DELETE FROM demand_forecasts")
-    for r in forecast_df.itertuples():
-        cursor.execute("""
-            INSERT INTO demand_forecasts (
-                facility_id, blood_group, forecast_date, horizon_day,
-                predicted_units, lower_estimate, upper_estimate, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            r.facility_id, r.blood_group, r.forecast_date, r.horizon_day,
-            r.predicted_units, r.lower_estimate, r.upper_estimate, r.generated_at
-        ))
+    cursor.executemany("""
+        INSERT INTO demand_forecasts (
+            facility_id, blood_group, forecast_date, horizon_day,
+            predicted_units, lower_estimate, upper_estimate, generated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, [
+        (r.facility_id, r.blood_group, r.forecast_date, r.horizon_day,
+         r.predicted_units, r.lower_estimate, r.upper_estimate, r.generated_at)
+        for r in forecast_df.itertuples()
+    ])
         
     conn.commit()
     conn.close()

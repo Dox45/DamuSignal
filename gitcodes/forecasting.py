@@ -97,10 +97,12 @@ def train_and_forecast_demand(horizon_days: int = 14) -> Tuple[pd.DataFrame, Dic
     val_df = df_clean[df_clean['date'] >= split_date].copy()
 
     def make_model():
-        # Tweedie objective suits sparse, zero-heavy count demand (most facility/group/days are 0)
+        # Tweedie objective suits sparse, zero-heavy count demand (most facility/group/days are 0);
+        # n_jobs=1 prevents OpenMP multi-thread memory spikes on 512MB Render free tier.
         return lgb.LGBMRegressor(n_estimators=300, learning_rate=0.03, num_leaves=31,
                                  min_child_samples=50, objective='tweedie', subsample=0.8,
-                                 subsample_freq=1, colsample_bytree=0.8, random_state=42, verbose=-1)
+                                 subsample_freq=1, colsample_bytree=0.8, n_jobs=1,
+                                 random_state=42, verbose=-1)
 
     model = make_model()
     model.fit(train_df[features], train_df[target])

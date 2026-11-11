@@ -349,12 +349,25 @@ export default function DashboardPage() {
     [facilityInventory]
   );
 
+  const forecastFacilities = useMemo(() => {
+    const forecastIds = new Set(forecasts.map((f) => f.facility_id));
+    const matched = facilities.filter((f) => forecastIds.has(f.facility_id));
+    return matched.length > 0 ? matched : facilities;
+  }, [facilities, forecasts]);
+
+  const effectiveForecastFacilityId = useMemo(() => {
+    if (forecastFacilities.some((f) => f.facility_id === selectedFacilityId)) {
+      return selectedFacilityId;
+    }
+    return forecastFacilities[0]?.facility_id || selectedFacilityId;
+  }, [forecastFacilities, selectedFacilityId]);
+
   // Forecasting curve data
   const currentForecastData = useMemo(() => {
     return forecasts.filter(
-      (f) => f.facility_id === selectedFacilityId && f.blood_group === selectedForecastBg
+      (f) => f.facility_id === effectiveForecastFacilityId && f.blood_group === selectedForecastBg
     );
-  }, [forecasts, selectedFacilityId, selectedForecastBg]);
+  }, [forecasts, effectiveForecastFacilityId, selectedForecastBg]);
 
   const maxForecastVal = Math.max(
     ...currentForecastData.map((f) => f.upper_estimate || 0),
@@ -437,10 +450,12 @@ export default function DashboardPage() {
     try {
       setActionLoading(true);
       const res = await authFetch(`${API_BASE}/stockout-risks/simulate`, { method: 'POST' });
-      if (res.ok) {
-        showToast('⚡ Forward stockout simulation re-calculated with dynamic expirations.', 'success');
-        await loadData();
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned ${res.status}`);
       }
+      showToast('⚡ Forward stockout simulation re-calculated with dynamic expirations.', 'success');
+      await loadData();
     } catch (e: any) {
       showToast('Simulation failed: ' + e.message, 'error');
     } finally {
@@ -455,15 +470,17 @@ export default function DashboardPage() {
       setActionLoading(true);
       const turnOff = !aiIsOff;
       const res = await authFetch(`${API_BASE}/stockout-risks/simulate${turnOff ? '?ai_offline=true' : ''}`, { method: 'POST' });
-      if (res.ok) {
-        showToast(
-          turnOff
-            ? 'AI switched off. Risks now come from fallback rules on the physical count.'
-            : 'AI switched back on. Risks now use the demand forecast.',
-          turnOff ? 'info' : 'success'
-        );
-        await loadData();
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned ${res.status}`);
       }
+      showToast(
+        turnOff
+          ? 'AI switched off. Risks now come from fallback rules on the physical count.'
+          : 'AI switched back on. Risks now use the demand forecast.',
+        turnOff ? 'info' : 'success'
+      );
+      await loadData();
     } catch (e: any) {
       showToast('Mode switch failed: ' + e.message, 'error');
     } finally {
@@ -475,10 +492,12 @@ export default function DashboardPage() {
     try {
       setActionLoading(true);
       const res = await authFetch(`${API_BASE}/forecasts/run`, { method: 'POST' });
-      if (res.ok) {
-        showToast('🔄 LightGBM model re-trained and 14-day forecast refreshed.', 'success');
-        await loadData();
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned ${res.status}`);
       }
+      showToast('🔄 LightGBM model re-trained and 14-day forecast refreshed.', 'success');
+      await loadData();
     } catch (e: any) {
       showToast('Forecasting run failed: ' + e.message, 'error');
     } finally {
@@ -1029,11 +1048,11 @@ export default function DashboardPage() {
                   <div>
                     <label className="block text-[11px] text-gray-400 mb-1">Facility:</label>
                     <select
-                      value={selectedFacilityId}
+                      value={effectiveForecastFacilityId}
                       onChange={(e) => setSelectedFacilityId(e.target.value)}
                       className="bg-[#190305] border border-[#52191F] rounded-lg px-3 py-1.5 text-xs text-white"
                     >
-                      {facilities.map((f) => (
+                      {forecastFacilities.map((f) => (
                         <option key={f.facility_id} value={f.facility_id}>
                           {f.name}
                         </option>
@@ -1065,6 +1084,12 @@ export default function DashboardPage() {
                   <span>Re-train LightGBM Model</span>
                 </button>
               </div>
+
+              {selectedFacilityId !== effectiveForecastFacilityId && (
+                <div className="mt-3 px-3 py-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200">
+                  Selected site <span className="font-mono font-semibold">{selectedFacilityId}</span> is a distribution hub without direct transfusion demand; displaying clinical demand forecast for <span className="font-mono font-semibold">{effectiveForecastFacilityId}</span>.
+                </div>
+              )}
 
               {/* Baseline vs Model Performance Stats */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-[#3E1116] text-xs">

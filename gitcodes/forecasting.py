@@ -20,8 +20,9 @@ def find_data_file(filename: str) -> Path:
 
 def train_and_forecast_demand(horizon_days: int = 14) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """
-    Trains LightGBM demand forecasting model with recursive roll-forward feature generation
-    and compares against a 7-day moving average baseline.
+    Trains a LightGBM (Tweedie) demand model and compares it against a previous-week
+    moving average baseline on a held-out final window. Forecasts the next `horizon_days`
+    directly: every feature is at least `horizon_days` old, so nothing is fed back recursively.
     Falls back to embedded pre-aggregated daily_demand.json.gz when raw requests.csv is excluded (e.g. Render).
     Returns:
         forecast_df: Projected daily demand per facility and blood group with confidence intervals.
@@ -63,108 +64,125 @@ def train_and_forecast_demand(horizon_days: int = 14) -> Tuple[pd.DataFrame, Dic
     df_demand = df_demand.sort_values(['facility_id', 'blood_group', 'date']).reset_index(drop=True)
     
     # Feature Engineering
-    for lag in [7, 14, 21]:
-        df_demand[f'demand_lag_{lag}'] = df_demand.groupby(['facility_id', 'blood_group'])['units_requested'].shift(lag)
-        
-    df_demand['demand_roll_mean_7'] = df_demand.groupby(['facility_id', 'blood_group'])['units_requested'].transform(
-        lambda x: x.shift(7).rolling(7).mean()
-    )
-    
+    # Every feature uses information at least `horizon_days` old, so the same
+    # features exist for every day of the forecast window (direct forecast, no recursion).
+    grp = df_demand.groupby(['facility_id', 'blood_group'])['units_requested']
+    H = horizon_days
+    for lag in [H, H + 7, H + 14]:
+        df_demand[f'demand_lag_{lag}'] = grp.shift(lag)
+    for w in [7, 14, 28, 56]:
+        df_demand[f'demand_roll_mean_{w}'] = grp.transform(lambda x, w=w: x.shift(H).rolling(w).mean())
+    # Simple baseline: mean of the previous week (days t-14 .. t-8), as before
+    df_demand['baseline_pred'] = grp.transform(lambda x: x.shift(7).rolling(7).mean())
+
     df_demand['day_of_week'] = df_demand['date'].dt.day_of_week
     df_demand['month'] = df_demand['date'].dt.month
     df_demand['is_weekend'] = df_demand['day_of_week'].isin([5, 6]).astype(int)
-    
+    df_demand['facility_code'] = df_demand['facility_id'].astype('category')
+    df_demand['group_code'] = df_demand['blood_group'].astype('category')
+
     df_clean = df_demand.dropna().reset_index(drop=True)
-    
-    # Chronological Split
+
+    # Chronological split: last `horizon_days` held out, with a gap so no
+    # training target overlaps the features of the test window.
     max_date = df_clean['date'].max()
     split_date = max_date - pd.Timedelta(days=horizon_days)
-    
-    features = ['demand_lag_7', 'demand_lag_14', 'demand_lag_21', 'demand_roll_mean_7', 'day_of_week', 'month', 'is_weekend']
+
+    features = [f'demand_lag_{H}', f'demand_lag_{H + 7}', f'demand_lag_{H + 14}',
+                'demand_roll_mean_7', 'demand_roll_mean_14', 'demand_roll_mean_28', 'demand_roll_mean_56',
+                'day_of_week', 'month', 'is_weekend', 'facility_code', 'group_code']
     target = 'units_requested'
-    
-    train_df = df_clean[df_clean['date'] < split_date]
+
+    train_df = df_clean[df_clean['date'] < split_date - pd.Timedelta(days=H)]
     val_df = df_clean[df_clean['date'] >= split_date].copy()
-    
-    val_df['baseline_pred'] = val_df['demand_roll_mean_7']
-    
-    model = lgb.LGBMRegressor(n_estimators=100, random_state=42, verbose=-1)
+
+    def make_model():
+        # Tweedie objective suits sparse, zero-heavy count demand (most facility/group/days are 0)
+        return lgb.LGBMRegressor(n_estimators=300, learning_rate=0.03, num_leaves=31,
+                                 min_child_samples=50, objective='tweedie', subsample=0.8,
+                                 subsample_freq=1, colsample_bytree=0.8, random_state=42, verbose=-1)
+
+    model = make_model()
     model.fit(train_df[features], train_df[target])
     val_df['lgb_pred'] = model.predict(val_df[features]).clip(0)
-    
+
     # Metrics
     baseline_mae = mean_absolute_error(val_df[target], val_df['baseline_pred'])
     lgb_mae = mean_absolute_error(val_df[target], val_df['lgb_pred'])
-    
+
     def wape(actual, pred):
         denom = np.sum(actual)
         return float(np.sum(np.abs(actual - pred)) / denom) if denom > 0 else 0.0
-        
+
     baseline_wape = wape(val_df[target].values, val_df['baseline_pred'].values)
     lgb_wape = wape(val_df[target].values, val_df['lgb_pred'].values)
-    
+
+    # Weekly view (facility x blood group x week): the level managers plan at
+    val_df['week'] = (val_df['date'] - split_date).dt.days // 7
+    wk = val_df.groupby(['facility_id', 'blood_group', 'week'])[[target, 'baseline_pred', 'lgb_pred']].sum()
+    weekly_baseline_mae = mean_absolute_error(wk[target], wk['baseline_pred'])
+    weekly_lgb_mae = mean_absolute_error(wk[target], wk['lgb_pred'])
+    weekly_baseline_wape = wape(wk[target].values, wk['baseline_pred'].values)
+    weekly_lgb_wape = wape(wk[target].values, wk['lgb_pred'].values)
+
     # Standard residual error for prediction intervals
     residuals = val_df[target] - val_df['lgb_pred']
     residual_std = float(residuals.std()) if not residuals.empty else 0.5
-    
+
     metrics = {
         'baseline_mae': round(float(baseline_mae), 4),
         'baseline_wape': round(float(baseline_wape), 4),
         'lgb_mae': round(float(lgb_mae), 4),
         'lgb_wape': round(float(lgb_wape), 4),
+        'weekly_baseline_mae': round(float(weekly_baseline_mae), 4),
+        'weekly_lgb_mae': round(float(weekly_lgb_mae), 4),
+        'weekly_baseline_wape': round(float(weekly_baseline_wape), 4),
+        'weekly_lgb_wape': round(float(weekly_lgb_wape), 4),
         'residual_std': round(residual_std, 4),
+        'test_window': f"{split_date.date()} to {max_date.date()}",
         'trained_until': str(max_date.date())
     }
-    
-    # Recursive Forward Projection for the next 14 days
+
+    # Refit on all available history, then forecast the next `horizon_days` directly
+    model = make_model()
+    model.fit(df_clean[features], df_clean[target])
+
     projection_dates = pd.date_range(start=max_date + pd.Timedelta(days=1), periods=horizon_days)
-    
-    # Build dictionary of historical series per facility and blood group
-    history_dict = {}
-    for (f, bg), g in df_demand.groupby(['facility_id', 'blood_group']):
-        history_dict[(f, bg)] = list(g.sort_values('date')['units_requested'].values)
-        
+    future = pd.MultiIndex.from_product(
+        [projection_dates, facilities, blood_groups], names=['date', 'facility_id', 'blood_group']
+    ).to_frame(index=False)
+    future['units_requested'] = np.nan
+    full = pd.concat([df_demand[['date', 'facility_id', 'blood_group', 'units_requested']], future], ignore_index=True)
+    full = full.sort_values(['facility_id', 'blood_group', 'date']).reset_index(drop=True)
+    fgrp = full.groupby(['facility_id', 'blood_group'])['units_requested']
+    for lag in [H, H + 7, H + 14]:
+        full[f'demand_lag_{lag}'] = fgrp.shift(lag)
+    for w in [7, 14, 28, 56]:
+        full[f'demand_roll_mean_{w}'] = fgrp.transform(lambda x, w=w: x.shift(H).rolling(w).mean())
+    full['day_of_week'] = full['date'].dt.day_of_week
+    full['month'] = full['date'].dt.month
+    full['is_weekend'] = full['day_of_week'].isin([5, 6]).astype(int)
+    full['facility_code'] = pd.Categorical(full['facility_id'], categories=df_demand['facility_code'].cat.categories)
+    full['group_code'] = pd.Categorical(full['blood_group'], categories=df_demand['group_code'].cat.categories)
+
+    fut = full[full['date'] > max_date].copy()
+    fut['pred'] = model.predict(fut[features]).clip(0)
+    generated_at = datetime.now().isoformat()
+
     forecast_records = []
-    
-    for step_idx, p_date in enumerate(projection_dates):
-        dow = p_date.day_of_week
-        month = p_date.month
-        is_wknd = 1 if dow in [5, 6] else 0
-        
-        step_features = []
-        keys = []
-        for f in facilities:
-            for bg in blood_groups:
-                hist = history_dict.get((f, bg), [0.0] * 30)
-                lag_7 = hist[-7] if len(hist) >= 7 else 0.0
-                lag_14 = hist[-14] if len(hist) >= 14 else 0.0
-                lag_21 = hist[-21] if len(hist) >= 21 else 0.0
-                roll_mean_7 = float(np.mean(hist[-14:-7])) if len(hist) >= 14 else float(np.mean(hist[-7:]))
-                
-                step_features.append([lag_7, lag_14, lag_21, roll_mean_7, dow, month, is_wknd])
-                keys.append((f, bg))
-                
-        preds = model.predict(pd.DataFrame(step_features, columns=features)).clip(0)
-        
-        for (f, bg), pred in zip(keys, preds):
-            pred_val = round(float(pred), 2)
-            lower_val = max(0.0, round(float(pred - 1.28 * residual_std), 2))
-            upper_val = round(float(pred + 1.28 * residual_std), 2)
-            
-            # Roll forward into history for subsequent lags
-            history_dict[(f, bg)].append(pred_val)
-            
-            forecast_records.append({
-                'facility_id': f,
-                'blood_group': bg,
-                'forecast_date': p_date.strftime('%Y-%m-%d'),
-                'horizon_day': step_idx + 1,
-                'predicted_units': pred_val,
-                'lower_estimate': lower_val,
-                'upper_estimate': upper_val,
-                'generated_at': datetime.now().isoformat()
-            })
-            
+    for r in fut.itertuples():
+        pred = float(r.pred)
+        forecast_records.append({
+            'facility_id': r.facility_id,
+            'blood_group': r.blood_group,
+            'forecast_date': r.date.strftime('%Y-%m-%d'),
+            'horizon_day': (r.date - max_date).days,
+            'predicted_units': round(pred, 2),
+            'lower_estimate': max(0.0, round(pred - 1.28 * residual_std, 2)),
+            'upper_estimate': round(pred + 1.28 * residual_std, 2),
+            'generated_at': generated_at
+        })
+
     forecast_df = pd.DataFrame(forecast_records)
     return forecast_df, metrics
 

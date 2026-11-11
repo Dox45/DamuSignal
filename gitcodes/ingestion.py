@@ -167,7 +167,9 @@ def run_pipeline():
     print(f"  • Trained up to: {metrics['trained_until']}")
     print(f"  • Baseline 7-day MA - MAE: {metrics['baseline_mae']:.4f}, WAPE: {metrics['baseline_wape']*100:.2f}%")
     print(f"  • LightGBM Model    - MAE: {metrics['lgb_mae']:.4f}, WAPE: {metrics['lgb_wape']*100:.2f}%")
-    print(f"  • Generated {len(forecast_df)} forward projection points (14-day recursive horizon).")
+    print(f"  • Weekly (facility x group) MAE - baseline: {metrics['weekly_baseline_mae']:.3f}, LightGBM: {metrics['weekly_lgb_mae']:.3f}")
+    print(f"  • Held-out test window: {metrics['test_window']}")
+    print(f"  • Generated {len(forecast_df)} forward projection points (14-day horizon).")
     
     # Store forecasts into DB
     conn = get_connection()

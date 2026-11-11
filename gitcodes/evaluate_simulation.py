@@ -17,43 +17,45 @@ def run_operational_impact_evaluation():
     # Calculate units recommended for transfer
     total_units_redistributed = int(recs_df['recommended_quantity'].sum())
     
-    # Calculate stockouts avoided:
-    # A transfer recommendation provides sufficient units to bridge the deficit gap
-    # If recommended_quantity >= 3 units, it prevents a stockout event for that facility/group
-    stockouts_avoided = len(recs_df[recs_df['recommended_quantity'] >= 2])
-    
+    # Shortage positions that received a transfer proposal. This is coverage of the
+    # current risk list, not a claim about stock-outs prevented: that needs a pilot
+    # or a replay against held-out stock, which is listed under known limits.
+    shortages_df = risks_df[risks_df['risk_status'].isin(['Critical', 'High Risk'])]
+    positions_with_proposal = int(len(recs_df))
+    coverage_pct = round(100.0 * positions_with_proposal / total_shortages, 1) if total_shortages else 0.0
+
     # Average travel distance and transit time
     avg_km = round(float(recs_df['road_km'].mean()), 1)
     avg_hours = round(float(recs_df['typical_travel_hours'].mean()), 1)
-    
-    # Average days gained before stockout
-    # Without transfer: median 2 days to stockout
-    # With transfer: pushes stockout horizon by 4 to 8 days
-    shortage_duration_reduced_days = 4.8
-    
+
+    # Median days to projected stock-out among positions the model flags (excludes already-empty shelves)
+    flagged = shortages_df[shortages_df['current_stock'] > 0]['projected_days_to_stockout'].dropna()
+    median_days_warning = float(flagged.median()) if not flagged.empty else None
+
     results = {
         'total_shortage_positions_identified': total_shortages,
         'actionable_recommendations_generated': total_recs,
-        'total_units_redistributed': total_units_redistributed,
-        'projected_stockout_events_avoided': stockouts_avoided,
-        'average_shortage_lead_time_gained_days': shortage_duration_reduced_days,
+        'total_units_proposed_for_transfer': total_units_redistributed,
+        'shortage_positions_with_proposal': positions_with_proposal,
+        'shortage_positions_with_proposal_pct': coverage_pct,
+        'median_days_warning_before_projected_stockout': median_days_warning,
         'average_redistribution_distance_km': avg_km,
         'average_redistribution_transit_hours': avg_hours,
         'source_safety_reserve_maintained_units': 15
     }
-    
+
     print("\n" + "=" * 65)
-    print("📊 OPERATIONAL SIMULATION BACKTEST RESULTS (Section 8 Evaluation)")
+    print("📊 PIPELINE OUTPUT ON THE SYNTHETIC STARTER DATASET")
     print("=" * 65)
-    print(f"  • Total Shortages Monitored:          {results['total_shortage_positions_identified']}")
-    print(f"  • Actionable Transfers Proposed:       {results['actionable_recommendations_generated']}")
-    print(f"  • Total Blood Units Redistributed:    {results['total_units_redistributed']} units")
-    print(f"  • Projected Stockouts Avoided:        {results['projected_stockout_events_avoided']} events")
-    print(f"  • Lead Time Gained Before Deficit:    +{results['average_shortage_lead_time_gained_days']} days")
-    print(f"  • Avg Redistribution Distance:        {results['average_redistribution_distance_km']} km (~{results['average_redistribution_transit_hours']} hrs transit)")
-    print(f"  • Source Safety Buffer Preserved:     ≥ {results['source_safety_reserve_maintained_units']} units")
+    print(f"  • Critical and high-risk positions:    {results['total_shortage_positions_identified']}")
+    print(f"  • Transfers proposed:                  {results['actionable_recommendations_generated']}")
+    print(f"  • Units proposed for transfer:         {results['total_units_proposed_for_transfer']} units")
+    print(f"  • Shortage positions with a proposal:  {results['shortage_positions_with_proposal']} ({results['shortage_positions_with_proposal_pct']}%)")
+    print(f"  • Median warning before projected stock-out (stock > 0): {results['median_days_warning_before_projected_stockout']} days")
+    print(f"  • Avg transfer distance:               {results['average_redistribution_distance_km']} km (~{results['average_redistribution_transit_hours']} hrs by road)")
+    print(f"  • Source safety reserve kept:          ≥ {results['source_safety_reserve_maintained_units']} units")
     print("=" * 65 + "\n")
-    
+
     return results
 
 if __name__ == "__main__":

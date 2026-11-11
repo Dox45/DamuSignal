@@ -153,6 +153,24 @@ def test_system_status(headers):
     assert "operational_mode" in data
     print("✅ test_system_status passed")
 
+def test_ai_offline_fallback(headers):
+    """With the model switched off, risks come from the rule-based fallback and the workflow still works."""
+    res = client.post("/api/stockout-risks/simulate?ai_offline=true", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["mode"] == "Fallback Heuristic"
+    status = client.get("/api/system-status", headers=headers).json()
+    assert status["operational_mode"] == "Fallback Heuristic"
+    risks = client.get("/api/stockout-risks", headers=headers).json()
+    key = [k for k in risks if isinstance(risks[k], list)][0]
+    assert len(risks[key]) > 0
+    assert all("Fallback rules" in r["contributing_factors"] for r in risks[key])
+    # Switch the model back on
+    res = client.post("/api/stockout-risks/simulate", headers=headers)
+    assert res.status_code == 200 and res.json()["mode"] == "Full Predictive AI"
+    status = client.get("/api/system-status", headers=headers).json()
+    assert status["operational_mode"] == "Full Predictive AI"
+    print("✅ test_ai_offline_fallback passed")
+
 def test_simulation_trigger(headers):
     res = client.post("/api/stockout-risks/simulate", headers=headers)
     assert res.status_code == 200
@@ -172,4 +190,5 @@ if __name__ == "__main__":
     test_recommendation_workflow_and_audit(auth_headers)
     test_system_status(auth_headers)
     test_simulation_trigger(auth_headers)
-    print("\n🎉 ALL 9 BACKEND AND API INTEGRATION TESTS (INCLUDING AUTH GATE) PASSED!\n")
+    test_ai_offline_fallback(auth_headers)
+    print("\n🎉 ALL 10 BACKEND AND API INTEGRATION TESTS (INCLUDING AUTH GATE) PASSED!\n")

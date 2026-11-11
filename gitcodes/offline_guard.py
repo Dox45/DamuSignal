@@ -77,11 +77,14 @@ def run_offline_heuristic_fallback(inventory_df: pd.DataFrame) -> pd.DataFrame:
             'facility_id': row.facility_id,
             'component': row.component,
             'blood_group': row.blood_group,
-            'current_stock': qty,
-            'projected_days_to_stockout': 1 if qty <= 2 else (3 if qty <= 5 else None),
-            'earliest_stockout_date': "Estimated within 24-72 hrs",
+            'current_stock': int(qty),
+            'projected_days_to_stockout': None,
+            'earliest_stockout_date': None,
             'risk_status': risk,
-            'contributing_factors': f"Offline Heuristic: Current physical count is {qty} units (Threshold < 4).",
+            'contributing_factors': (
+                f"Fallback rules (forecast model off): physical count is {qty} unit(s). "
+                f"0 = Critical, 1-3 = High Risk, 4-8 = Moderate Risk. No days-to-stock-out estimate without the model."
+            ),
             'simulated_at': datetime.now().isoformat()
         })
     return pd.DataFrame(records)

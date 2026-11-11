@@ -99,6 +99,14 @@ def startup_event():
             run_pipeline()
         except Exception as e:
             print(f"[Render Deployment Initialization] Pipeline run notice: {e}")
+    # Stamp the load time so the staleness guard measures age from when this node last loaded data
+    try:
+        conn = get_connection()
+        row = conn.cursor().execute("SELECT is_ml_online FROM system_status WHERE id = 1").fetchone()
+        conn.close()
+        evaluate_system_health(is_ml_online=bool(row["is_ml_online"]) if row else True)
+    except Exception as e:
+        print(f"[Startup] System status notice: {e}")
 
 
 @app.post("/api/auth/login")
@@ -234,7 +242,7 @@ def get_forecasts(facility_id: Optional[str] = None, blood_group: Optional[str] 
 
 @app.post("/api/forecasts/run", dependencies=[Depends(verify_token)])
 def trigger_demand_forecasting(horizon_days: int = 14):
-    """Re-train LightGBM model and generate recursive 14-day projection."""
+    """Re-train LightGBM model and generate the 14-day projection."""
     forecast_df, metrics = train_and_forecast_demand(horizon_days=horizon_days)
     
     conn = get_connection()
@@ -288,19 +296,36 @@ def get_stockout_risks(risk_status: Optional[str] = None, facility_id: Optional[
 
 
 @app.post("/api/stockout-risks/simulate", dependencies=[Depends(verify_token)])
-def trigger_inventory_simulation():
-    """Run forward simulation of stock depletion and unit expiry against forecasts."""
+def trigger_inventory_simulation(
+    ai_offline: bool = Query(False, description="True = ignore the forecast model and rank risk with the rule-based fallback on physical stock counts only")
+):
+    """Run forward simulation of stock depletion and unit expiry against forecasts.
+
+    With ai_offline=true the forecast model is skipped entirely and the deterministic
+    fallback rules classify each position from its physical count, so the officer can
+    still finish the task when the model is wrong, stale or unreachable.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Fetch latest forecasts
-    forecast_rows = [dict(r) for r in cursor.execute("SELECT * FROM demand_forecasts").fetchall()]
-    if not forecast_rows:
-        conn.close()
-        raise HTTPException(status_code=400, detail="No forecasts found. Run /api/forecasts/run first.")
-        
-    f_df = pd.DataFrame(forecast_rows)
-    risk_df, inv_df = simulate_inventory_and_risks(f_df)
+
+    if ai_offline:
+        inv_rows = [dict(r) for r in cursor.execute("SELECT * FROM inventory_positions").fetchall()]
+        if not inv_rows:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No inventory positions found. Run the ingestion pipeline first.")
+        inv_df = pd.DataFrame(inv_rows)
+        risk_df = run_offline_heuristic_fallback(inv_df)
+        evaluate_system_health(is_ml_online=False)
+    else:
+        # Fetch latest forecasts
+        forecast_rows = [dict(r) for r in cursor.execute("SELECT * FROM demand_forecasts").fetchall()]
+        if not forecast_rows:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No forecasts found. Run /api/forecasts/run first.")
+
+        f_df = pd.DataFrame(forecast_rows)
+        risk_df, inv_df = simulate_inventory_and_risks(f_df)
+        evaluate_system_health(is_ml_online=True)
     
     # Update inventory_positions
     for r in inv_df.itertuples():
@@ -335,6 +360,7 @@ def trigger_inventory_simulation():
     
     return {
         "status": "success",
+        "mode": "Fallback Heuristic" if ai_offline else "Full Predictive AI",
         "total_evaluated": len(risk_df),
         "critical_risks": critical_count,
         "high_risks": high_count
@@ -521,8 +547,13 @@ def get_donor_appeal(facility_id: str = Query(...), blood_group: str = Query(...
 
 @app.get("/api/system-status", dependencies=[Depends(verify_token)])
 def get_system_status():
-    """Evaluate telemetry age, connectivity state, and fallback heuristic mode."""
-    return evaluate_system_health()
+    """Report data age and whether the model or the rule-based fallback produced the current risks."""
+    conn = get_connection()
+    row = conn.cursor().execute("SELECT is_ml_online, last_sync_timestamp FROM system_status WHERE id = 1").fetchone()
+    conn.close()
+    is_ml_online = bool(row["is_ml_online"]) if row else True
+    last_sync = row["last_sync_timestamp"] if row else None
+    return evaluate_system_health(sync_timestamp_str=last_sync, is_ml_online=is_ml_online)
 
 
 @app.get("/api/health")

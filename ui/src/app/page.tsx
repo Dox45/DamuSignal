@@ -448,12 +448,35 @@ export default function DashboardPage() {
     }
   };
 
+  const aiIsOff = systemStatus.operational_mode === 'Fallback Heuristic';
+
+  const handleToggleAi = async () => {
+    try {
+      setActionLoading(true);
+      const turnOff = !aiIsOff;
+      const res = await authFetch(`${API_BASE}/stockout-risks/simulate${turnOff ? '?ai_offline=true' : ''}`, { method: 'POST' });
+      if (res.ok) {
+        showToast(
+          turnOff
+            ? 'AI switched off. Risks now come from fallback rules on the physical count.'
+            : 'AI switched back on. Risks now use the demand forecast.',
+          turnOff ? 'info' : 'success'
+        );
+        await loadData();
+      }
+    } catch (e: any) {
+      showToast('Mode switch failed: ' + e.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRetrainForecast = async () => {
     try {
       setActionLoading(true);
       const res = await authFetch(`${API_BASE}/forecasts/run`, { method: 'POST' });
       if (res.ok) {
-        showToast('🔄 LightGBM model re-trained with 14-day recursive roll-forward.', 'success');
+        showToast('🔄 LightGBM model re-trained and 14-day forecast refreshed.', 'success');
         await loadData();
       }
     } catch (e: any) {
@@ -509,7 +532,7 @@ export default function DashboardPage() {
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight">Blood Inventory Intelligence</h1>
             <p className="text-xs text-gray-400 max-w-xs mx-auto">
-              Kenyan National Blood Transfusion Service Decision-Support Node
+              Stock-out early warning prototype · synthetic Kenya-modelled data
             </p>
           </div>
 
@@ -518,10 +541,10 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between pb-3 border-b border-[#3E1116]">
               <div className="flex items-center gap-2 text-xs font-semibold text-red-300">
                 <Lock className="w-4 h-4 text-red-400" />
-                <span>Restricted Medical Access Gate</span>
+                <span>Staff sign-in</span>
               </div>
               <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 font-mono">
-                RBAC Level 3
+                Demo access
               </span>
             </div>
 
@@ -577,8 +600,8 @@ export default function DashboardPage() {
             </form>
 
             <div className="pt-2 border-t border-[#3E1116] text-[10px] text-gray-500 space-y-1 text-center">
-              <p>🔒 Enforces cryptographic audit trail under ISBT 128 & Kenya NBTS guidelines.</p>
-              <p>All human-in-the-loop transfer decisions are logged with authorizing clinician credentials.</p>
+              <p>🔒 Every accept, change or reject is written to the audit log with user, time and reason.</p>
+              <p>Synthetic starter dataset only. No real donor, patient or facility records.</p>
             </div>
           </div>
         </div>
@@ -611,7 +634,7 @@ export default function DashboardPage() {
             <span className="px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-red-950 text-red-400 border border-red-800/60 text-[10px]">
               TERUMO BCT AFRICA HACKATHON
             </span>
-            <span className="text-gray-300 hidden sm:inline">Kenyan National Blood Service Decision-Support Node</span>
+            <span className="text-gray-300 hidden sm:inline">Decision-support prototype · synthetic data</span>
           </div>
 
           <div className="flex items-center gap-4 text-gray-300">
@@ -621,6 +644,14 @@ export default function DashboardPage() {
                 Mode: <strong className="text-white">{systemStatus.operational_mode || 'Full Predictive AI'}</strong>
               </span>
             </div>
+            <button
+              onClick={handleToggleAi}
+              disabled={actionLoading}
+              title="Switch the forecast model off to finish the task on fallback rules, or back on"
+              className={`px-2 py-0.5 rounded border text-[11px] font-bold transition ${aiIsOff ? 'bg-amber-900/60 text-amber-200 border-amber-600/60 hover:bg-amber-800/60' : 'bg-[#2A070B] text-gray-200 border-[#5A1A20] hover:bg-[#3A0B10]'}`}
+            >
+              {aiIsOff ? 'Switch AI on' : 'Switch AI off'}
+            </button>
             <div className="hidden md:flex items-center gap-1 text-gray-400">
               <Clock className="w-3.5 h-3.5" />
               <span>Sync Age: {systemStatus.data_age_hours ? `${systemStatus.data_age_hours} hrs` : '0.1 hrs'}</span>
@@ -725,7 +756,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="mt-2 text-2xl font-black text-white">{totalUsableUnits.toLocaleString()}</div>
                 <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Live verified physical stock
+                  <CheckCircle2 className="w-3 h-3" /> Latest end-of-day count
                 </p>
               </div>
 
@@ -776,7 +807,7 @@ export default function DashboardPage() {
                       <Activity className="w-4 h-4 text-red-500" />
                       Network Usable Inventory by Blood Group
                     </h2>
-                    <p className="text-xs text-gray-400">Total units available across the Kenyan healthcare supply network</p>
+                    <p className="text-xs text-gray-400">Total units available across the 47 synthetic facilities</p>
                   </div>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/40 border border-white/5 text-gray-300 font-mono">
                     All Components
@@ -1047,11 +1078,11 @@ export default function DashboardPage() {
                 </div>
                 <div className="p-3 bg-black/20 rounded-xl border border-white/5">
                   <span className="text-gray-400">LightGBM Model MAE:</span>
-                  <p className="font-mono font-bold text-emerald-400 text-base mt-0.5">0.4917</p>
+                  <p className="font-mono font-bold text-emerald-400 text-base mt-0.5">0.4361</p>
                 </div>
                 <div className="p-3 bg-black/20 rounded-xl border border-white/5">
                   <span className="text-gray-400">LightGBM Model WAPE:</span>
-                  <p className="font-mono font-bold text-emerald-400 text-base mt-0.5">135.3%</p>
+                  <p className="font-mono font-bold text-emerald-400 text-base mt-0.5">120.0%</p>
                 </div>
               </div>
             </div>
@@ -1065,11 +1096,11 @@ export default function DashboardPage() {
                     14-Day Forward Demand Projection Curve
                   </h3>
                   <p className="text-xs text-gray-400">
-                    Showing daily predicted demand with 90% and 10% confidence bounds
+                    Daily predicted demand with an 80% uncertainty band above each bar
                   </p>
                 </div>
                 <span className="text-xs px-2.5 py-1 rounded bg-red-950 text-red-300 border border-red-800/60 font-mono">
-                  Recursive lag roll-forward
+                  Direct 14-day forecast
                 </span>
               </div>
 
@@ -1107,7 +1138,7 @@ export default function DashboardPage() {
                           </span>
                           {/* Stacked Chart Column inside explicit flex-1 height container */}
                           <div className="w-full flex-1 flex flex-col justify-end items-center min-h-0">
-                            {/* Upper 90% confidence interval band */}
+                            {/* Upper bound of the 80% uncertainty band */}
                             {bandDeltaPct > 0 && (
                               <div
                                 className="w-full bg-red-950/70 rounded-t border-t border-x border-dashed border-red-400/60"
@@ -1209,9 +1240,9 @@ export default function DashboardPage() {
                             <td className="py-2.5 px-2 font-bold text-white">{r.blood_group}</td>
                             <td className="py-2.5 px-2 text-right font-mono font-bold text-white">{r.current_stock}</td>
                             <td className="py-2.5 px-2 text-center font-mono font-bold">
-                              {r.projected_days_to_stockout ? `Day ${r.projected_days_to_stockout}` : '>14 Days'}
+                              {r.projected_days_to_stockout ? `Day ${r.projected_days_to_stockout}` : (r.current_stock === 0 ? 'Now' : (aiIsOff ? 'n/a (AI off)' : '>14 Days'))}
                             </td>
-                            <td className="py-2.5 px-2 font-mono text-gray-400">{r.earliest_stockout_date || 'Stable'}</td>
+                            <td className="py-2.5 px-2 font-mono text-gray-400">{r.earliest_stockout_date || (r.current_stock === 0 ? 'Out of stock' : (aiIsOff ? 'n/a (AI off)' : 'Stable'))}</td>
                             <td className="py-2.5 px-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${badgeClass}`}>
                                 {r.risk_status}
@@ -1573,7 +1604,7 @@ export default function DashboardPage() {
       {/* Footer */}
       <footer className="bg-[#190305] border-t border-[#3A1014] px-4 py-3 text-xs text-gray-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Terumo BCT Africa Hackathon 2026 · Starter Sandbox Production Prototype</span>
+          <span>Terumo BCT Africa Hackathon 2026 · Prototype on the synthetic starter dataset</span>
           <span className="font-mono">Next.js 16 (TypeScript + Tailwind) · FastAPI + SQLite · LightGBM Regressor</span>
         </div>
       </footer>

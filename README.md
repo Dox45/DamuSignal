@@ -34,7 +34,7 @@ These figures describe the synthetic dataset, not any real Kenyan facility.
   - One demo user. Role-based access for hospital and regional roles is not built.
   - Thresholds, shelf lives and the 15-unit reserve are constants in the code, not yet a settings table.
 
-Demo video (3 minutes or less): https://www.loom.com/share/389de6b633e444a2a054f016effdb677  
+Demo video (3 minutes or less): https://drive.google.com/file/d/1k8oFinUFC9XB4kND7L10g6w4S2kaU8fX/view?usp=sharing  
 Live demo: https://damusignal.vercel.app · Test log-in: dr_odhiambo / bloodbank2026
 
 ![Regional overview](docs/screenshot_overview.jpg)

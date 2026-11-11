@@ -3,7 +3,7 @@
 Terumo BCT Africa Hackathon 2026 · Challenge area: Stock-out early warning and forecasting
 
 ## The problem
-**User:** a Regional Transfusion Officer at a regional blood transfusion centre (our persona is "Dr. Amina Odhiambo"), who supplies county hospitals 1 to 3 times a week.
+**User:** a Regional Transfusion Officer at a regional blood transfusion centre (our persona is "Dr. Amina Odhiambo"), who supplies county hospitals 1 to 3 times a week. 
 
 **Today:** she learns a hospital is out of a blood group when the hospital phones. An emergency resupply then takes a median of about 5 hours, longer for remote counties.
 
@@ -189,7 +189,6 @@ We have not yet replayed the proposals against held-out stock, so we make no cla
 
 ## AI tools we used
 - **Antigravity AI** (Chima): code refactoring and test suite generation.
-- **Claude, Anthropic** (Ayomide): review of the repository against the brief, the forecasting rework and baseline evaluation, the AI-off fallback switch, dashboard fixes, README edits, the architecture image and drafting the pitch deck.
 
 ## Team
 | Name | Role | Country | Presenting Friday (in person / online) |
